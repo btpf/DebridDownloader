@@ -27,6 +27,8 @@ export default function Layout() {
     ? "about"
     : location.pathname.startsWith("/watchlist")
     ? "watchlist"
+    : location.pathname.startsWith("/statistics")
+    ? "statistics"
     : "torrents";
 
   const handleNavigate = (view: string) => {
@@ -77,6 +79,7 @@ export default function Layout() {
   useShortcut("2", go("/downloads"));
   useShortcut("3", go("/completed"));
   useShortcut("4", go("/watchlist"));
+  useShortcut("5", go("/statistics"));
   useShortcut("Mod+K", go("/search"));
   useShortcut("Mod+,", go("/settings"));
   useShortcut("Mod+N", fire("open-add-torrent"));

@@ -24,6 +24,7 @@ import DownloadsPage from "./pages/DownloadsPage";
 import CompletedPage from "./pages/CompletedPage";
 import SearchPage from "./pages/SearchPage";
 import WatchListPage from "./pages/WatchListPage";
+import StatisticsPage from "./pages/StatisticsPage";
 import { settingsRoutes } from "./pages/settings/SettingsLayout";
 
 const navigateRef: { current: ReturnType<typeof useNavigate> | null } = { current: null };
@@ -186,6 +187,7 @@ function App() {
                 <Route path="/completed" element={<CompletedPage />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/watchlist" element={<WatchListPage />} />
+                <Route path="/statistics" element={<StatisticsPage />} />
                 {settingsRoutes}
                 <Route path="*" element={<Navigate to="/torrents" replace />} />
               </Route>

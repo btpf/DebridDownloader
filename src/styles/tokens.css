@@ -22,6 +22,10 @@
   --idle: #8a8a8a;
   --shadow-color: rgb(0 0 0 / 0.4);
   --selected-mix: 16%;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
   color-scheme: dark;
 }
 
@@ -41,6 +45,10 @@
   --idle: #8c8c8c;
   --shadow-color: rgb(0 0 0 / 0.08);
   --selected-mix: 12%;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
   color-scheme: light;
 }
 
@@ -72,6 +80,11 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-idle: var(--idle);
+  /* Chart series colors: identity only (a provider), never text. */
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-fg: var(--accent-fg);

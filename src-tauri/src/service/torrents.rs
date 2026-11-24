@@ -175,6 +175,9 @@ pub async fn add_routed(state: &AppState, source: TorrentSource<'_>) -> Result<V
     for (id, e) in &errors {
         log::warn!("Adding the torrent to {} failed: {}", id, e);
     }
+    let hits: Vec<String> = added.iter().map(|a| a.response.provider.clone()).collect();
+    let misses: Vec<String> = errors.iter().map(|(id, _)| id.clone()).collect();
+    crate::service::stats::record_add(state, &hits, &misses).await;
     if added.is_empty() {
         let only_one = errors.len() == 1;
         return Err(errors

@@ -402,6 +402,36 @@ async fn adding_fails_only_when_every_provider_refuses() {
 }
 
 #[tokio::test]
+async fn adds_count_a_hit_for_the_taker_and_a_miss_for_each_refusal_and_are_saved() {
+    use crate::persistence::PROVIDER_STATS_KEY;
+    let env = env()
+        .with_provider("torbox", FakeProvider::failing_adds("Too big"))
+        .await
+        .with_provider("alldebrid", FakeProvider::new("good"))
+        .await;
+    crate::service::stats::load(&env.state, &env.persistence).await;
+
+    torrents::add_magnet(&env.state, "m").await.unwrap();
+    torrents::add_torrent_file(&env.state, &[1]).await.unwrap();
+
+    let stats = crate::service::stats::get_provider_stats(&env.state).await;
+    let counts: Vec<(&str, &str, u64, u64)> =
+        stats.iter().map(|s| (s.provider.as_str(), s.name.as_str(), s.hits, s.misses)).collect();
+    assert_eq!(&counts[..2], &[("torbox", "TorBox", 0, 2), ("alldebrid", "AllDebrid", 2, 0)]);
+    assert!(counts[2..].iter().all(|c| c.2 == 0 && c.3 == 0), "providers never tried have zeros");
+    assert_eq!(env.stored(PROVIDER_STATS_KEY).unwrap()["alldebrid"]["hits"], 2);
+
+    // A restart picks the saved counts back up.
+    let restarted = AppState::new();
+    crate::service::stats::load(&restarted, &env.persistence).await;
+    assert_eq!(restarted.provider_stats.read().await.get("torbox").unwrap().misses, 2);
+
+    crate::service::stats::reset_provider_stats(&env.state, &env.persistence).await.unwrap();
+    assert!(crate::service::stats::get_provider_stats(&env.state).await.iter().all(|s| s.hits == 0 && s.misses == 0));
+    assert_eq!(env.stored(PROVIDER_STATS_KEY).unwrap(), serde_json::json!({}));
+}
+
+#[tokio::test]
 async fn add_to_all_providers_adds_everywhere_and_skips_disabled_ones() {
     let a = FakeProvider::new("good");
     let b = FakeProvider::failing_adds("Not cached");

@@ -188,6 +188,7 @@ pub fn run() {
                         Err(e) => log::warn!("Failed to deserialize persisted AppSettings, using defaults: {}", e),
                     }
                 }
+                tauri::async_runtime::block_on(crate::service::stats::load(&state, &store));
             }
 
             // Load watch list data from store and spawn watch loop
@@ -280,6 +281,8 @@ pub fn run() {
             commands::torrents::select_torrent_files,
             commands::torrents::delete_torrent,
             commands::torrents::retry_torrent,
+            commands::stats::get_provider_stats,
+            commands::stats::reset_provider_stats,
             // Downloads
             commands::archive::inspect_torrent_archive,
             commands::archive::start_archive_contents_download,
