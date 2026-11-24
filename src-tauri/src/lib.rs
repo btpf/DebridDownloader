@@ -279,6 +279,7 @@ pub fn run() {
             commands::torrents::add_torrent_file,
             commands::torrents::select_torrent_files,
             commands::torrents::delete_torrent,
+            commands::torrents::retry_torrent,
             // Downloads
             commands::archive::inspect_torrent_archive,
             commands::archive::start_archive_contents_download,

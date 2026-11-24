@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Issue #47: in Tauri, tauri-plugin-dialog replaces window.confirm with an async version that
@@ -90,16 +90,37 @@ describe("Torrent delete confirmation (#47)", () => {
     expect(deleteTorrent).not.toHaveBeenCalled();
   });
 
-  it("toolbar Delete All waits for the answer and keeps torrents on No", async () => {
-    const { confirm, answer } = stubAsyncConfirm();
+  /** Toolbar ⋮ → "Delete All (n)…", which opens the "Are you sure?" dialog. */
+  async function openDeleteAll() {
     render(<TooltipProvider><TorrentsPage /></TooltipProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: "Delete All" }));
-    expect(confirm).toHaveBeenCalledWith("Delete all 1 torrents?");
-    await act(async () => {});
+    await screen.findByText("Movie.mp4", { selector: "div" });
+    const more = screen.getByRole("button", { name: "Torrent list actions" });
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete All (1)…" }));
+    return await screen.findByRole("dialog", { name: "Delete all torrents?" });
+  }
+
+  it("toolbar Delete All asks \"Are you sure?\" and keeps torrents on Cancel", async () => {
+    const dialog = await openDeleteAll();
+    expect(dialog).toHaveTextContent("Are you sure?");
     expect(deleteTorrent).not.toHaveBeenCalled();
-    await answer(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(deleteTorrent).not.toHaveBeenCalled();
     expect(screen.getByText("Movie.mp4", { selector: "div" })).toBeInTheDocument();
+  });
+
+  it("toolbar Delete All deletes every torrent after confirming", async () => {
+    const dialog = await openDeleteAll();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete All" }));
+    await waitFor(() => expect(deleteTorrent).toHaveBeenCalledWith("T1", undefined));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("the toolbar has no Delete All button of its own", async () => {
+    render(<TooltipProvider><TorrentsPage /></TooltipProvider>);
+    await screen.findByText("Movie.mp4", { selector: "div" });
+    expect(screen.queryByRole("button", { name: "Delete All" })).toBeNull();
   });
 
   it("delete-selected shortcut deletes after Yes", async () => {

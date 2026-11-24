@@ -12,7 +12,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { confirmAction } from "../lib/confirm";
 import type { Torrent, TorrentInfo, AppSettings } from "../types";
 import { providerName, torrentCopies, torrentKey } from "../lib/providers";
-import { Button, cn, ContextMenu, IconButton, Inspector, Menu, Spinner, StatusDot, Toolbar, type MenuItem } from "../components/ui";
+import { Button, cn, ContextMenu, Dialog, IconButton, Inspector, Menu, Spinner, StatusDot, Toolbar, type MenuItem } from "../components/ui";
 import {
   formatBytes,
   formatRelativeTime,
@@ -33,6 +33,15 @@ const MoreIcon = () => (
     <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
   </svg>
 );
+
+const VerticalMoreIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+    <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
+  </svg>
+);
+
+/** No provider has the torrent ready (no green dot), so starting it over may help. */
+const noCopyReady = (t: Torrent) => !torrentCopies(t).some((c) => c.status === "downloaded");
 
 /** Copy via a hidden textarea (the right-click menu's original copy path). */
 function copyText(text: string) {
@@ -229,8 +238,12 @@ export default function TorrentsPage() {
     if (await confirmAction(deletePrompt(t))) await handleDelete(t);
   };
 
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  /** Runs after the "Are you sure?" dialog's Delete All. */
   const handleDeleteAll = async () => {
-    if (!(await confirmAction(`Delete all ${torrents.length} torrents?`))) return;
+    setDeletingAll(true);
     try {
       for (const t of torrents) {
         await deleteCopies(t).catch(() => {});
@@ -238,6 +251,24 @@ export default function TorrentsPage() {
       setTorrents([]);
       setSelectedId(null);
     } catch (e) { setError(String(e)); }
+    finally {
+      setDeletingAll(false);
+      setConfirmDeleteAll(false);
+    }
+  };
+
+  /** Delete each copy and add the torrent's magnet back to the same provider. */
+  const handleRetry = async (t: Torrent) => {
+    setError("");
+    try {
+      await torrentsApi.retryTorrent(t.hash, torrentCopies(t).map((c) => ({ provider: c.provider, id: c.id })));
+      if (selectedId === torrentKey(t)) setSelectedId(null);
+      setNotice(`Retrying ${t.filename}`);
+    } catch (e) {
+      setError(`Couldn't retry ${t.filename}: ${String(e)}`);
+    } finally {
+      fetchTorrents();
+    }
   };
 
   const handleDownloadTorrent = async (torrent: Torrent) => {
@@ -359,10 +390,8 @@ export default function TorrentsPage() {
   const rowMenuItems = (t: Torrent): MenuItem[] => [
     { label: "Preview", onSelect: () => preview(t) },
     { label: "Download", onSelect: () => handleDownloadTorrent(t) },
+    ...(noCopyReady(t) && t.hash ? [{ label: "Retry", onSelect: () => { void handleRetry(t); } }] : []),
     { label: "Delete", danger: true, onSelect: () => { confirmDelete(t); } },
-    ...(torrents.length > 1
-      ? (["separator", { label: `Delete All (${torrents.length})`, danger: true, onSelect: () => handleDeleteAll() }] as MenuItem[])
-      : []),
     { label: "Copy Magnet", onSelect: () => copyText("magnet:?xt=urn:btih:" + t.hash) },
   ];
 
@@ -446,14 +475,24 @@ export default function TorrentsPage() {
         filter={{ value: filter, onChange: setFilter, placeholder: "Filter torrents", inputRef: filterRef }}
         actions={
           <>
-            {torrents.length > 0 && (
-              <Button variant="danger" onClick={handleDeleteAll}>
-                Delete All
-              </Button>
-            )}
             <Button variant="primary" kbd="Mod+N" onClick={() => setShowAdd(true)}>
               Add Torrent
             </Button>
+            <Menu
+              trigger={
+                <IconButton label="Torrent list actions">
+                  <VerticalMoreIcon />
+                </IconButton>
+              }
+              items={[
+                {
+                  label: torrents.length > 0 ? `Delete All (${torrents.length})…` : "Delete All…",
+                  danger: true,
+                  disabled: torrents.length === 0,
+                  onSelect: () => setConfirmDeleteAll(true),
+                },
+              ]}
+            />
           </>
         }
       />
@@ -668,6 +707,27 @@ export default function TorrentsPage() {
           onClose={() => setZipTarget(null)}
           onStarted={(root, count) => setNotice(`Downloading ${count} ${count === 1 ? "file" : "files"} from ${zipTarget.name} into ${root}`)}
         />
+      )}
+
+      {confirmDeleteAll && (
+        <Dialog
+          open
+          width="sm"
+          onOpenChange={(o) => { if (!o && !deletingAll) setConfirmDeleteAll(false); }}
+          title="Delete all torrents?"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirmDeleteAll(false)} disabled={deletingAll}>Cancel</Button>
+              <Button variant="danger" onClick={() => { void handleDeleteAll(); }} disabled={deletingAll}>
+                {deletingAll ? "Deleting..." : "Delete All"}
+              </Button>
+            </>
+          }
+        >
+          <p className="text-base text-fg">
+            Are you sure? This deletes all {torrents.length} {torrents.length === 1 ? "torrent" : "torrents"} from every provider that holds them. This can't be undone.
+          </p>
+        </Dialog>
       )}
 
       {/* Add torrent modal */}

@@ -38,6 +38,12 @@ pub async fn select_torrent_files(
     svc::select_torrent_files(&state, &id, &file_ids, provider.as_deref()).await
 }
 
+/// Delete each copy of a stuck torrent and add its magnet again to the same provider.
+#[tauri::command]
+pub async fn retry_torrent(state: State<'_, AppState>, hash: String, copies: Vec<svc::TorrentRef>) -> Result<Vec<AddTorrentResponse>, String> {
+    svc::retry_torrent(&state, &hash, &copies).await
+}
+
 #[tauri::command]
 pub async fn delete_torrent(state: State<'_, AppState>, id: String, provider: Option<String>) -> Result<(), String> {
     svc::delete_torrent(&state, &id, provider.as_deref()).await

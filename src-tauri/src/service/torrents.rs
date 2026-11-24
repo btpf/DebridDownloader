@@ -227,3 +227,58 @@ pub async fn delete_torrent(state: &AppState, id: &str, provider: Option<&str>) 
     let provider = state.provider_for(provider).await?.1;
     provider.delete_torrent(id).await.map_err(|e| format!("{}", e))
 }
+
+/// One provider's copy of a torrent: its provider id and that provider's torrent id.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct TorrentRef {
+    pub provider: String,
+    pub id: String,
+}
+
+/// A BitTorrent info hash: 40 hex characters (SHA-1) or 32 base32 characters.
+fn valid_info_hash(hash: &str) -> bool {
+    match hash.len() {
+        40 => hash.chars().all(|c| c.is_ascii_hexdigit()),
+        32 => hash.chars().all(|c| c.is_ascii_alphanumeric()),
+        _ => false,
+    }
+}
+
+/// Start a stuck torrent over: on each provider holding a copy, delete that copy and add the
+/// torrent's magnet again (selecting every file). The copy is deleted first because some
+/// providers hand back the existing torrent when the same hash is added twice. Returns the new
+/// copies; errors, naming the providers, if any of them failed.
+pub async fn retry_torrent(state: &AppState, hash: &str, copies: &[TorrentRef]) -> Result<Vec<AddTorrentResponse>, String> {
+    let hash = hash.trim();
+    if !valid_info_hash(hash) {
+        return Err("This torrent has no info hash to add it again from".to_string());
+    }
+    if copies.is_empty() {
+        return Err("Nothing to retry".to_string());
+    }
+    let magnet = format!("magnet:?xt=urn:btih:{}", hash);
+    let mut added = Vec::new();
+    let mut errors = Vec::new();
+    for copy in copies {
+        let result: Result<AddTorrentResponse, String> = async {
+            let (provider_id, provider) = state.provider_for(Some(&copy.provider)).await?;
+            provider.delete_torrent(&copy.id).await.map_err(|e| format!("couldn't delete the old copy: {}", e))?;
+            let mut response = add_to(&provider, TorrentSource::Magnet(&magnet)).await?;
+            response.provider = provider_id;
+            if let Err(e) = provider.select_files(&response.id, &[]).await {
+                log::warn!("Selecting the files of {} on {} failed: {}", response.id, response.provider, e);
+            }
+            Ok(response)
+        }
+        .await;
+        match result {
+            Ok(r) => added.push(r),
+            Err(e) => errors.push(format!("{}: {}", provider_name(&copy.provider), e)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(added)
+    } else {
+        Err(errors.join("; "))
+    }
+}

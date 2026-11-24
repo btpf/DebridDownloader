@@ -129,6 +129,7 @@ pub fn router(s: ServerState) -> Router {
         .route("/api/torrents", get(list_torrents))
         .route("/api/torrents/magnet", post(add_magnet))
         .route("/api/torrents/file", post(add_torrent_file))
+        .route("/api/torrents/retry", post(retry_torrent))
         .route("/api/torrents/{id}", get(get_torrent_info))
         .route("/api/torrents/{id}", delete(delete_torrent))
         .route("/api/torrents/{id}/select", post(select_torrent_files))
@@ -688,6 +689,17 @@ struct TorrentFileRequest {
 
 async fn add_torrent_file(State(s): State<ServerState>, Body(body): Body<TorrentFileRequest>) -> ApiResult<AddTorrentResponse> {
     Ok(Json(service::torrents::add_torrent_file(&s.state, &body.file_bytes).await?))
+}
+
+#[derive(Deserialize)]
+struct RetryRequest {
+    hash: String,
+    copies: Vec<service::torrents::TorrentRef>,
+}
+
+/// `retry_torrent`: delete each copy and add the torrent's magnet again to the same provider.
+async fn retry_torrent(State(s): State<ServerState>, Body(body): Body<RetryRequest>) -> ApiResult<Vec<AddTorrentResponse>> {
+    Ok(Json(service::torrents::retry_torrent(&s.state, &body.hash, &body.copies).await?))
 }
 
 #[derive(Deserialize)]
@@ -1432,6 +1444,11 @@ mod tests {
             (get.clone(), "/api/torrents?page=1&limit=5", None),
             (post.clone(), "/api/torrents/magnet", Some(json!({ "magnet": "magnet:?xt=urn:btih:abc" }))),
             (post.clone(), "/api/torrents/file", Some(json!({ "fileBytes": [1, 2, 3] }))),
+            (
+                post.clone(),
+                "/api/torrents/retry",
+                Some(json!({ "hash": "0123456789abcdef0123456789abcdef01234567", "copies": [{ "provider": "torbox", "id": "t1" }] })),
+            ),
             (get.clone(), "/api/torrents/{id}", None),
             (delete.clone(), "/api/torrents/{id}", None),
             (post.clone(), "/api/torrents/{id}/select", Some(json!({ "fileIds": "all" }))),

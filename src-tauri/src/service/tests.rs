@@ -365,6 +365,29 @@ async fn adding_falls_back_down_the_priority_list() {
 }
 
 #[tokio::test]
+async fn retrying_deletes_each_copy_and_adds_the_magnet_back_to_the_same_provider() {
+    let tb = FakeProvider::new("good");
+    let ad = FakeProvider::failing_adds("Not cached");
+    let env = env().with_provider("torbox", tb.clone()).await.with_provider("alldebrid", ad.clone()).await;
+    let hash = "0123456789ABCDEF0123456789abcdef01234567";
+    let copy = |p: &str, id: &str| torrents::TorrentRef { provider: p.into(), id: id.into() };
+
+    let added = torrents::retry_torrent(&env.state, hash, &[copy("torbox", "t9")]).await.unwrap();
+    assert_eq!((added[0].id.as_str(), added[0].provider.as_str()), ("new", "torbox"));
+    assert_eq!(tb.calls(), vec!["delete:t9".to_string(), format!("magnet:magnet:?xt=urn:btih:{}", hash)]);
+    assert_eq!(tb.selected.lock().unwrap().clone(), Some(("new".to_string(), vec![])));
+    assert!(ad.calls().is_empty(), "only the providers holding a copy are retried");
+
+    let err = torrents::retry_torrent(&env.state, hash, &[copy("torbox", "a"), copy("alldebrid", "b")]).await.unwrap_err();
+    assert_eq!(err, "AllDebrid: Not cached");
+
+    for bad in ["", "xyz", "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"] {
+        assert!(torrents::retry_torrent(&env.state, bad, &[copy("torbox", "a")]).await.is_err(), "{bad}");
+    }
+    assert!(torrents::retry_torrent(&env.state, hash, &[]).await.is_err());
+}
+
+#[tokio::test]
 async fn adding_fails_only_when_every_provider_refuses() {
     let env = env()
         .with_provider("torbox", FakeProvider::failing_adds("Too big"))

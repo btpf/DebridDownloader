@@ -57,6 +57,7 @@ export const HTTP_ROUTES: Record<string, Route> = {
   list_torrents: { method: "GET", path: "/api/torrents", query: ["page", "limit"] },
   add_magnet: { method: "POST", path: "/api/torrents/magnet", body: ["magnet"] },
   add_torrent_file: { method: "POST", path: "/api/torrents/file", body: ["fileBytes"] },
+  retry_torrent: { method: "POST", path: "/api/torrents/retry", body: ["hash", "copies"] },
   get_torrent_info: { method: "GET", path: "/api/torrents/{id}", query: ["provider"] },
   delete_torrent: { method: "DELETE", path: "/api/torrents/{id}", query: ["provider"] },
   select_torrent_files: { method: "POST", path: "/api/torrents/{id}/select", body: ["fileIds", "provider"] },

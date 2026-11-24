@@ -34,6 +34,7 @@ const { torrentsApi, updateSettings } = vi.hoisted(() => {
       deleteTorrent: vi.fn().mockResolvedValue(undefined),
       selectTorrentFiles: vi.fn(),
       addTorrentFile: vi.fn().mockResolvedValue({ id: "new", provider: "real-debrid" }),
+      retryTorrent: vi.fn().mockResolvedValue([]),
     },
     updateSettings: vi.fn().mockResolvedValue(undefined),
   };
@@ -117,6 +118,47 @@ describe("Torrents list across providers", () => {
     await waitFor(() => expect(torrentsApi.deleteTorrent).toHaveBeenCalledTimes(2));
     expect(torrentsApi.deleteTorrent).toHaveBeenCalledWith("R1", "real-debrid");
     expect(torrentsApi.deleteTorrent).toHaveBeenCalledWith("A1", "alldebrid");
+  });
+});
+
+describe("Row right-click menu", () => {
+  async function rightClickRow() {
+    render(<TooltipProvider><TorrentsPage /></TooltipProvider>);
+    fireEvent.contextMenu(await screen.findByText("Movie.mp4", { selector: "div" }));
+    return await screen.findByRole("menu");
+  }
+
+  it("has no Delete All, and no Retry while a provider has the torrent ready", async () => {
+    const menu = await rightClickRow();
+    expect(within(menu).queryByRole("menuitem", { name: /Delete All/ })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "Retry" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("offers Retry when no provider has it ready, and retries every copy", async () => {
+    const stuck = {
+      ...torrentsApi.merged,
+      id: "R1",
+      provider: "real-debrid",
+      status: "magnet_error",
+      copies: [
+        { provider: "real-debrid", id: "R1", status: "magnet_error", progress: 0 },
+        { provider: "alldebrid", id: "A1", status: "downloading", progress: 10 },
+      ],
+    };
+    torrentsApi.listTorrents.mockImplementation(() => Promise.resolve([stuck]));
+    try {
+      const menu = await rightClickRow();
+      fireEvent.click(within(menu).getByRole("menuitem", { name: "Retry" }));
+      await waitFor(() =>
+        expect(torrentsApi.retryTorrent).toHaveBeenCalledWith("abc", [
+          { provider: "real-debrid", id: "R1" },
+          { provider: "alldebrid", id: "A1" },
+        ]),
+      );
+    } finally {
+      torrentsApi.listTorrents.mockImplementation(() => Promise.resolve([torrentsApi.merged]));
+    }
   });
 });
 
