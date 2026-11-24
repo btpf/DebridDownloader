@@ -514,6 +514,15 @@ fn a_merged_row_keeps_a_hash_from_any_copy() {
 }
 
 #[test]
+fn the_close_button_asks_unless_a_choice_was_saved() {
+    assert_eq!(AppSettings::default().close_action, "ask");
+    // A blob saved before the setting existed still loads, and asks.
+    let mut blob = serde_json::to_value(AppSettings::default()).unwrap();
+    blob.as_object_mut().unwrap().remove("close_action");
+    assert_eq!(serde_json::from_value::<AppSettings>(blob).unwrap().close_action, "ask");
+}
+
+#[test]
 fn provider_prefs_come_from_the_legacy_provider_and_stay_complete() {
     let mut legacy = AppSettings { provider: "torbox".into(), ..AppSettings::default() };
     let prefs = legacy.provider_prefs();

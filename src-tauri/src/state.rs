@@ -64,6 +64,14 @@ pub struct AppSettings {
     /// one (in priority order) that accepts it.
     #[serde(default)]
     pub add_to_all_providers: bool,
+    /// What the window's close button does: "ask" (a dialog), "tray" (hide; downloads keep
+    /// running) or "quit".
+    #[serde(default = "default_close_action")]
+    pub close_action: String,
+}
+
+fn default_close_action() -> String {
+    "ask".to_string()
 }
 
 /// One provider's place in the priority list.
@@ -160,6 +168,7 @@ impl Default for AppSettings {
             segments_per_file: default_segments(),
             providers: Vec::new(),
             add_to_all_providers: false,
+            close_action: default_close_action(),
         }
     }
 }

@@ -56,7 +56,7 @@ Secrets (API tokens, OAuth client id/secret, refresh tokens) live in the OS keyr
 
 1. **Streaming proxy** — `streaming::start_streaming_server` spawns an Axum server on a random port, stored in `state.streaming_port`. Frontend gets per-session URLs via `commands::streaming::get_stream_url` for in-app preview / casting. Sessions are tracked in `state.stream_sessions` and must be cleaned up.
 2. **Watchlist loop** — `watchlist::start_watch_loop` polls user-defined search rules across configured trackers and emits matches; cancellable via `state.watch_cancel`.
-3. **Tray icon** — built inline; "Show Window" / "Quit" plus left-click-to-show. Closing the main window does not quit (the tray keeps the process alive).
+3. **Tray icon** — built inline; "Show Window" / "Quit" plus left-click-to-show. The main window's close button follows `AppSettings.close_action`: "ask" (default) emits `close-requested` and `CloseDialog` offers Quit / Exit to Tray / Cancel, with "Remember my choice" saving the answer; "tray" hides the window (the tray keeps the process and downloads alive); "quit" exits. See `commands/window.rs`; the choice can be changed in Settings → General.
 4. **Magnet deep-link handler** — `magnet:` scheme is registered (`tauri.conf.json`). Three entry points feed the same `magnet-link-received` event: the deep-link plugin callback, `tauri-plugin-single-instance` (for already-running app on Win/Linux), and a CLI-args scan in `setup` (cold start). Cold-start URIs land in `PendingMagnetUri` until the frontend asks for them via `commands::magnet::get_pending_magnet_uri`. **Validate every magnet URI through `commands::magnet::validate_magnet_uri` before trusting it** — the deep-link plugin will hand you arbitrary URLs.
 
 ### Downloads

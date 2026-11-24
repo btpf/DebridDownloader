@@ -11,3 +11,4 @@ pub mod settings;
 pub mod streaming;
 pub mod torrents;
 pub mod watchlist;
+pub mod window;

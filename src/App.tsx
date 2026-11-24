@@ -25,6 +25,7 @@ import CompletedPage from "./pages/CompletedPage";
 import SearchPage from "./pages/SearchPage";
 import WatchListPage from "./pages/WatchListPage";
 import StatisticsPage from "./pages/StatisticsPage";
+import CloseDialog from "./components/CloseDialog";
 import { settingsRoutes } from "./pages/settings/SettingsLayout";
 
 const navigateRef: { current: ReturnType<typeof useNavigate> | null } = { current: null };
@@ -199,6 +200,7 @@ function App() {
         <MiniPlayerToast />
         {magnetError && <Toast message={magnetError} duration={6000} onDismiss={() => setMagnetError(null)} />}
         <MiniPlayerLogoutCleanup />
+        <CloseDialog />
       </AuthContext.Provider>
     </MiniPlayerProvider>
     </TooltipProvider>

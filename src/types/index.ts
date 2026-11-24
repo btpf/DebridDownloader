@@ -254,7 +254,12 @@ export interface AppSettings {
   providers?: ProviderPref[];
   /** Add torrents to every enabled, signed-in provider instead of only the first that accepts them. */
   add_to_all_providers?: boolean;
+  /** What the window's close button does. */
+  close_action?: CloseAction;
 }
+
+/** "ask" shows the close dialog; "tray" hides the window (downloads keep running); "quit" exits. */
+export type CloseAction = "ask" | "tray" | "quit";
 
 // ── Search ──
 

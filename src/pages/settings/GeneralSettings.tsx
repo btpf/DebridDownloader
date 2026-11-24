@@ -5,6 +5,7 @@ import { Button, cn, Select, SettingsGroup, SettingsRow, Toggle } from "../../co
 import { useAppearance, type ThemePref } from "../../hooks/useAppearance";
 import { ACCENTS, ACCENT_NAMES } from "../../theme/accents";
 import { useSettings } from "./useSettings";
+import type { CloseAction } from "../../types";
 
 const THEMES: { id: ThemePref; label: string }[] = [
   { id: "system", label: "System" },
@@ -13,7 +14,7 @@ const THEMES: { id: ThemePref; label: string }[] = [
 ];
 
 export default function GeneralSettings() {
-  const { frontend, applyFrontend } = useSettings();
+  const { settings, applyChange, frontend, applyFrontend } = useSettings();
   const appearance = useAppearance();
   // The OS is the source of truth for autostart; show its state like the old page did.
   const [launchAtLogin, setLaunchAtLogin] = useState(frontend.launch_at_login);
@@ -60,6 +61,18 @@ export default function GeneralSettings() {
             label="Notify when download completes"
             checked={frontend.notify_on_complete}
             onChange={(v) => applyFrontend({ notify_on_complete: v })}
+          />
+        </SettingsRow>
+        <SettingsRow label="When closing the window" description="What the window's close button does. Downloads keep running in the tray.">
+          <Select<CloseAction>
+            ariaLabel="When closing the window"
+            value={settings?.close_action ?? "ask"}
+            onValueChange={(v) => { void applyChange({ close_action: v }); }}
+            options={[
+              { value: "ask", label: "Ask every time" },
+              { value: "tray", label: "Exit to tray" },
+              { value: "quit", label: "Quit" },
+            ]}
           />
         </SettingsRow>
         <SettingsRow label="Default sort order" description="How torrents are sorted when you open the app">

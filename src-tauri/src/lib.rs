@@ -247,12 +247,13 @@ pub fn run() {
         .manage(AppState::new())
         // Desktop build keeps secrets in the OS keyring (constructing it touches no keychain).
         .manage(secrets::Secrets(std::sync::Arc::new(secrets::KeyringStore::new())))
-        // Closing the main window hides it to the tray; downloads keep running. Quit from the tray (or ⌘Q) exits.
+        // The main window's close button asks whether to quit or hide to the tray (downloads keep
+        // running), unless a choice was remembered in `close_action`. Quit from the tray (or ⌘Q) exits.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
-                    let _ = window.hide();
+                    commands::window::on_close_requested(window);
                 }
             }
         })
@@ -316,6 +317,8 @@ pub fn run() {
             // Magnet link handler
             commands::magnet::set_magnet_handler,
             commands::magnet::get_pending_magnet_uri,
+            // Window
+            commands::window::close_main_window,
             // rclone
             commands::rclone::check_rclone,
             commands::rclone::list_rclone_remotes,
