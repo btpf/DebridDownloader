@@ -147,8 +147,6 @@ pub fn router(s: ServerState) -> Router {
         .route("/api/auth/oauth/token", post(oauth_get_token))
         .route("/api/providers", get(list_providers))
         .route("/api/providers/accounts", get(provider_accounts))
-        .route("/api/stats/providers", get(get_provider_stats))
-        .route("/api/stats/providers", delete(reset_provider_stats))
         // Search and trackers
         .route("/api/search", get(search_torrents))
         .route("/api/trackers", get(get_tracker_configs))
@@ -793,14 +791,6 @@ async fn get_auth_method(State(s): State<ServerState>, Params(q): Params<Provide
 
 async fn provider_accounts(State(s): State<ServerState>) -> ApiResult<Vec<crate::providers::types::ProviderAccount>> {
     Ok(Json(service::auth::get_provider_accounts(&s.state).await))
-}
-
-async fn get_provider_stats(State(s): State<ServerState>) -> ApiResult<Vec<service::stats::ProviderStats>> {
-    Ok(Json(service::stats::get_provider_stats(&s.state).await))
-}
-
-async fn reset_provider_stats(State(s): State<ServerState>) -> ApiResult<()> {
-    done(service::stats::reset_provider_stats(&s.state, &s.persistence)).await
 }
 
 #[derive(Deserialize)]
@@ -1476,8 +1466,6 @@ mod tests {
             (post.clone(), "/api/auth/oauth/token", Some(json!({ "clientId": "id", "clientSecret": "s", "deviceCode": "dc" }))),
             (get.clone(), "/api/providers", None),
             (get.clone(), "/api/providers/accounts", None),
-            (get.clone(), "/api/stats/providers", None),
-            (delete.clone(), "/api/stats/providers", None),
             // Search and trackers
             (get.clone(), "/api/search?query=show&sortBy=seeders", None),
             (get.clone(), "/api/trackers", None),

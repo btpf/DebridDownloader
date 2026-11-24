@@ -21,8 +21,6 @@ pub const TRACKER_CONFIGS_KEY: &str = "tracker_configs";
 pub const WATCH_RULES_KEY: &str = "watch_rules";
 pub const WATCH_MATCHES_KEY: &str = "watch_matches";
 pub const WATCH_SEEN_KEY: &str = "watch_seen_hashes";
-/// Per-provider add hits/misses (see `service::stats`).
-pub const PROVIDER_STATS_KEY: &str = "provider_stats";
 
 pub trait KvStore: Send + Sync {
     /// `Ok(None)` when nothing is stored under `key`.

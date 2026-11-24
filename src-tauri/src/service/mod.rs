@@ -11,7 +11,6 @@ pub mod backup;
 pub mod downloads;
 pub mod search;
 pub mod settings;
-pub mod stats;
 pub mod torrents;
 pub mod watchlist;
 

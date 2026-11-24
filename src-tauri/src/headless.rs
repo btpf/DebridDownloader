@@ -238,7 +238,6 @@ async fn load_persisted(state: &AppState, persistence: &Persistence) -> Result<(
             *state.watch_seen.write().await = seen;
         }
     }
-    crate::service::stats::load(state, persistence).await;
     Ok(())
 }
 

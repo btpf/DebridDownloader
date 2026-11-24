@@ -183,25 +183,12 @@ pub struct StreamSession {
     pub created_at: Instant,
 }
 
-/// How often a provider took a torrent (`hits`) or refused it (`misses`) when one was added.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-pub struct ProviderStat {
-    #[serde(default)]
-    pub hits: u64,
-    #[serde(default)]
-    pub misses: u64,
-}
-
 pub struct AppState {
     /// One client per provider id, signed in or not. Order and enabled flags live in
     /// `settings.providers`.
     pub providers: Arc<RwLock<HashMap<String, Arc<dyn DebridProvider>>>>,
     /// The account each signed-in provider answered with when its token was last checked.
     pub provider_users: Arc<RwLock<HashMap<String, User>>>,
-    /// Add hits/misses per provider id (see `service::stats`).
-    pub provider_stats: Arc<RwLock<HashMap<String, ProviderStat>>>,
-    /// Where `provider_stats` is saved; set at startup by `service::stats::load`.
-    pub stats_store: std::sync::OnceLock<crate::persistence::Persistence>,
     pub settings: Arc<RwLock<AppSettings>>,
     pub engine: std::sync::OnceLock<crate::engine::Engine>,
     pub streaming_port: Arc<RwLock<Option<u16>>>,
@@ -222,8 +209,6 @@ impl AppState {
         Self {
             providers: Arc::new(RwLock::new(providers)),
             provider_users: Arc::new(RwLock::new(HashMap::new())),
-            provider_stats: Arc::new(RwLock::new(HashMap::new())),
-            stats_store: std::sync::OnceLock::new(),
             settings: Arc::new(RwLock::new(AppSettings::default())),
             engine: std::sync::OnceLock::new(),
             streaming_port: Arc::new(RwLock::new(None)),

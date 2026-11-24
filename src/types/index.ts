@@ -46,14 +46,6 @@ export interface ProviderAccount {
   user: User | null;
 }
 
-/** Mirrors `ProviderStats` (service/stats.rs): how often a provider took (hit) or refused (miss) an added torrent. */
-export interface ProviderStats {
-  provider: string;
-  name: string;
-  hits: number;
-  misses: number;
-}
-
 /** Mirrors `ProviderPref` (state.rs): a provider's place in the priority list. */
 export interface ProviderPref {
   id: string;

@@ -85,8 +85,6 @@ export const HTTP_ROUTES: Record<string, Route> = {
   },
   get_available_providers: { method: "GET", path: "/api/providers" },
   get_provider_accounts: { method: "GET", path: "/api/providers/accounts" },
-  get_provider_stats: { method: "GET", path: "/api/stats/providers" },
-  reset_provider_stats: { method: "DELETE", path: "/api/stats/providers" },
   // Search and trackers
   search_torrents: { method: "GET", path: "/api/search", query: ["query", "category", "sortBy", "page"] },
   get_tracker_configs: { method: "GET", path: "/api/trackers" },

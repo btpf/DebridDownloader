@@ -8,7 +8,6 @@ pub mod media_servers;
 pub mod rclone;
 pub mod search;
 pub mod settings;
-pub mod stats;
 pub mod streaming;
 pub mod torrents;
 pub mod watchlist;
