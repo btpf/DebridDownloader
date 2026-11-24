@@ -12,6 +12,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { confirmAction } from "../lib/confirm";
 import type { Torrent, TorrentInfo, AppSettings } from "../types";
 import { providerName, torrentCopies, torrentKey } from "../lib/providers";
+import { getCachedTorrents, setCachedTorrents, updateCachedTorrents } from "../lib/torrentsCache";
+import { useAuth } from "../hooks/useAuth";
 import { Button, cn, ContextMenu, Dialog, IconButton, Inspector, Menu, Spinner, StatusDot, Toolbar, type MenuItem } from "../components/ui";
 import {
   formatBytes,
@@ -31,6 +33,25 @@ const DownloadIcon = () => (
 const MoreIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
     <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
+  </svg>
+);
+
+const RefreshIcon = ({ spinning }: { spinning: boolean }) => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+    className={spinning ? "animate-spin" : undefined}
+  >
+    <polyline points="23 4 23 10 17 10" />
+    <polyline points="1 20 1 14 7 14" />
+    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
   </svg>
 );
 
@@ -86,8 +107,15 @@ function ProviderList({ torrent }: { torrent: Torrent }) {
 }
 
 export default function TorrentsPage() {
-  const [torrents, setTorrents] = useState<Torrent[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Opening the tab again shows the cached list at once (see lib/torrentsCache).
+  const [torrents, setTorrents] = useState<Torrent[]>(() => getCachedTorrents()?.torrents ?? []);
+  const [loading, setLoading] = useState(() => getCachedTorrents() === null);
+  const [refreshing, setRefreshing] = useState(false);
+  const { accounts } = useAuth();
+  // The providers the list comes from; enabling, disabling, signing in or out changes it.
+  const activeProviders = accounts.filter((a) => a.enabled && a.authenticated).map((a) => a.id).join(",");
+  const activeProvidersRef = useRef(activeProviders);
+  activeProvidersRef.current = activeProviders;
   const [error, setError] = useState("");
   /** `torrentKey` of the selected row. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -135,18 +163,29 @@ export default function TorrentsPage() {
   // list arrives; only the first load shows the spinner. Swapping the table for a spinner on every
   // refresh made the list flicker.
   const fetchTorrents = useCallback(async () => {
+    setRefreshing(true);
     try {
+      const providers = activeProvidersRef.current;
       const data = await torrentsApi.listTorrents(1, 500);
+      // Cached even if the tab was left meanwhile, so the next visit gets it.
+      setCachedTorrents(data, providers);
       setTorrents(data);
       setError("");
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { fetchTorrents(); }, [fetchTorrents]);
+  // Fetch on the first visit and when the active providers change; otherwise the cached list
+  // stands until the Refresh button (or an add, delete or retry) fetches it again.
+  useEffect(() => {
+    const cached = getCachedTorrents();
+    if (!cached || cached.providers !== activeProviders) fetchTorrents();
+  }, [activeProviders, fetchTorrents]);
+  useEffect(() => { updateCachedTorrents(torrents); }, [torrents]);
   useEffect(() => { getSettings().then(setSettings).catch(() => {}); }, []);
 
   // Fetch detail when the selected copy changes
@@ -477,6 +516,9 @@ export default function TorrentsPage() {
         filter={{ value: filter, onChange: setFilter, placeholder: "Filter torrents", inputRef: filterRef }}
         actions={
           <>
+            <IconButton label="Refresh" onClick={() => { void fetchTorrents(); }} disabled={refreshing}>
+              <RefreshIcon spinning={refreshing} />
+            </IconButton>
             <Button variant="primary" kbd="Mod+N" onClick={() => setShowAdd(true)}>
               Add Torrent
             </Button>

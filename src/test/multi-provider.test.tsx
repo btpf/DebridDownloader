@@ -132,6 +132,51 @@ describe("Torrents list across providers", () => {
   });
 });
 
+describe("Torrents list cache", () => {
+  function page(accounts = ACCOUNTS) {
+    return (
+      <TooltipProvider>
+        <AuthContext.Provider value={auth({ accounts })}>
+          <TorrentsPage />
+        </AuthContext.Provider>
+      </TooltipProvider>
+    );
+  }
+
+  it("reopening the tab shows the cached list without fetching it again", async () => {
+    const first = render(page());
+    await screen.findByText("Movie.mp4", { selector: "div" });
+    first.unmount();
+    render(page());
+    expect(screen.getByText("Movie.mp4", { selector: "div" })).toBeInTheDocument();
+    await act(async () => {});
+    expect(torrentsApi.listTorrents).toHaveBeenCalledTimes(1);
+  });
+
+  it("the Refresh button between the filter and Add Torrent fetches the list again", async () => {
+    render(page());
+    await screen.findByText("Movie.mp4", { selector: "div" });
+    const refresh = screen.getByRole("button", { name: "Refresh" });
+    const filter = screen.getByRole("textbox", { name: "Filter torrents" });
+    const add = screen.getByRole("button", { name: /Add Torrent/ });
+    expect(filter.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(refresh.compareDocumentPosition(add) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(refresh);
+    await waitFor(() => expect(torrentsApi.listTorrents).toHaveBeenCalledTimes(2));
+  });
+
+  it("fetches again when a provider is enabled", async () => {
+    const view = render(page());
+    await screen.findByText("Movie.mp4", { selector: "div" });
+    view.rerender(page(ACCOUNTS.map((a) => (a.id === "premiumize" ? { ...a, enabled: true } : a))));
+    await waitFor(() => expect(torrentsApi.listTorrents).toHaveBeenCalledTimes(2));
+    // A sign-in that changes nothing about the active providers doesn't refetch.
+    view.rerender(page(ACCOUNTS.map((a) => (a.id === "premiumize" ? { ...a, enabled: true } : a))));
+    await act(async () => {});
+    expect(torrentsApi.listTorrents).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("Row right-click menu", () => {
   async function rightClickRow() {
     render(<TooltipProvider><TorrentsPage /></TooltipProvider>);

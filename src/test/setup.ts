@@ -1,9 +1,14 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { clearTorrentsCache } from "../lib/torrentsCache";
 
 // Vitest runs without globals, so Testing Library can't register its automatic cleanup.
-afterEach(() => cleanup());
+// Each test also starts with an empty Torrents cache, so every render fetches its own list.
+afterEach(() => {
+  cleanup();
+  clearTorrentsCache();
+});
 
 // jsdom has no matchMedia; components that call useAppearance need one. Tests that care about the
 // OS scheme (appearance.test.ts) stub their own with vi.stubGlobal.
