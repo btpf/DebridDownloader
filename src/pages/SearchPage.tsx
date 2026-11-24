@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { searchTorrents, checkCacheAvailability, getTrackerConfigs } from "../api/search";
-import { listTorrents, addMagnet, selectTorrentFiles } from "../api/torrents";
+import { listTorrents, addMagnet } from "../api/torrents";
+import { torrentKey } from "../lib/providers";
 import type { SearchResult, Torrent, TrackerStatus } from "../types";
 import { Button, cn, EmptyState, Input, Kbd, Spinner, StatusDot } from "../components/ui";
 import { torrentStatusDot, torrentStatusLabel } from "../utils";
@@ -156,8 +157,7 @@ export default function SearchPage() {
     if (value.startsWith("magnet:?")) {
       setQuery("");
       try {
-        const result = await addMagnet(value);
-        await selectTorrentFiles(result.id, "all");
+        await addMagnet(value);
         setAddedHashes((prev) => new Set(prev).add("pasted"));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
@@ -179,8 +179,7 @@ export default function SearchPage() {
   const handleAddTorrent = useCallback(async (result: SearchResult) => {
     setAddingHash(result.info_hash);
     try {
-      const response = await addMagnet(result.magnet);
-      await selectTorrentFiles(response.id, "all");
+      await addMagnet(result.magnet);
       setAddedHashes((prev) => {
         const next = new Set(prev);
         next.add(result.info_hash);
@@ -193,10 +192,11 @@ export default function SearchPage() {
     }
   }, []);
 
-  const handleSelectTorrent = useCallback((id: string) => {
+  /** `key`: the row key (`torrentKey`) the Torrents page selects. */
+  const handleSelectTorrent = useCallback((key: string) => {
     navigate("/torrents");
     setTimeout(() => {
-      window.dispatchEvent(new CustomEvent("torrent-select", { detail: id }));
+      window.dispatchEvent(new CustomEvent("torrent-select", { detail: key }));
     }, 50);
   }, [navigate]);
 
@@ -240,7 +240,7 @@ export default function SearchPage() {
         } else {
           const torrent = filteredLocal[selectedIndex];
           if (torrent) {
-            handleSelectTorrent(torrent.id);
+            handleSelectTorrent(torrentKey(torrent));
           }
         }
       }
@@ -380,10 +380,10 @@ export default function SearchPage() {
                 const torrent = item as Torrent;
                 return (
                   <div
-                    key={torrent.id}
+                    key={torrentKey(torrent)}
                     role="row"
                     aria-selected={index === selectedIndex}
-                    onClick={() => handleSelectTorrent(torrent.id)}
+                    onClick={() => handleSelectTorrent(torrentKey(torrent))}
                     className={cn(
                       "grid min-h-7.5 cursor-default items-center gap-3 border-b border-border-subtle px-4 py-1",
                       index === selectedIndex ? "bg-selected" : "hover:bg-raised",

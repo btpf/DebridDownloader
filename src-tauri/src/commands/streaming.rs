@@ -8,6 +8,7 @@ pub async fn get_stream_url(
     state: State<'_, AppState>,
     torrent_id: String,
     file_id: u64,
+    provider: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let port = state
         .streaming_port
@@ -16,7 +17,7 @@ pub async fn get_stream_url(
         .ok_or("Streaming server not running")?;
 
     // Verify torrent is ready for streaming
-    let provider = state.get_provider().await;
+    let provider = state.provider_for(provider.as_deref()).await?.1;
     let info = provider
         .torrent_info(&torrent_id)
         .await

@@ -63,7 +63,7 @@ describe("Torrent delete confirmation (#47)", () => {
     await act(async () => {});
     expect(deleteTorrent).not.toHaveBeenCalled();
     await answer(true);
-    await waitFor(() => expect(deleteTorrent).toHaveBeenCalledWith("T1"));
+    await waitFor(() => expect(deleteTorrent).toHaveBeenCalledWith("T1", undefined));
   });
 
   it("delete-selected shortcut waits for the answer and keeps the torrent on No", async () => {
@@ -107,7 +107,7 @@ describe("Torrent delete confirmation (#47)", () => {
     await renderAndSelect();
     act(() => { window.dispatchEvent(new Event("delete-selected")); });
     await answer(true);
-    await waitFor(() => expect(deleteTorrent).toHaveBeenCalledWith("T1"));
+    await waitFor(() => expect(deleteTorrent).toHaveBeenCalledWith("T1", undefined));
   });
 });
 

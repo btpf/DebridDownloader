@@ -1,24 +1,26 @@
 import { call } from "./transport";
 import type { DeviceCode, DeviceCredentials, OAuthToken, User } from "../types";
 
-export async function setApiToken(token: string): Promise<void> {
-  return call("set_api_token", { token });
+/** Sign provider `providerId` in with `token` (the primary provider when left out). */
+export async function setApiToken(token: string, providerId?: string): Promise<void> {
+  return call("set_api_token", { token, providerId: providerId ?? null });
 }
 
 export async function loadSavedToken(): Promise<boolean> {
   return call("load_saved_token");
 }
 
-export async function logout(): Promise<void> {
-  return call("logout");
+/** Sign provider `providerId` out, or every provider when left out. */
+export async function logout(providerId?: string): Promise<void> {
+  return call("logout", { providerId: providerId ?? null });
 }
 
 export async function isAuthenticated(): Promise<boolean> {
   return call("is_authenticated");
 }
 
-export async function getUser(): Promise<User> {
-  return call("get_user");
+export async function getUser(providerId?: string): Promise<User> {
+  return call("get_user", { providerId: providerId ?? null });
 }
 
 export async function oauthStart(): Promise<DeviceCode> {

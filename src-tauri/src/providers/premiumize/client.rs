@@ -147,6 +147,8 @@ fn map_torrent(t: &PmTransfer) -> shared::Torrent {
         ended: None,
         speed: None,
         seeders: None,
+        provider: String::new(),
+        copies: Vec::new(),
     }
 }
 
@@ -279,6 +281,7 @@ impl DebridProvider for PremiumizeClient {
             ended: None,
             speed: None,
             seeders: None,
+            provider: String::new(),
         })
     }
 
@@ -302,6 +305,7 @@ impl DebridProvider for PremiumizeClient {
         }
         Ok(shared::AddTorrentResponse {
             id: resp.id.unwrap_or_default(),
+            provider: String::new(),
         })
     }
 
@@ -335,6 +339,7 @@ impl DebridProvider for PremiumizeClient {
         }
         Ok(shared::AddTorrentResponse {
             id: api_resp.id.unwrap_or_default(),
+            provider: String::new(),
         })
     }
 

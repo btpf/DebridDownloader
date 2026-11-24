@@ -359,13 +359,18 @@ async fn auto_add(
     state: &AppState,
     magnet: &str,
 ) -> Result<(), String> {
-    let provider = state.get_provider().await;
-
-    let add_response = provider
-        .add_magnet(magnet)
+    // Same routing as a manual add: priority order with fallback, or every provider.
+    let added = crate::service::torrents::add_routed(state, crate::service::torrents::TorrentSource::Magnet(magnet))
         .await
         .map_err(|e| format!("Failed to add magnet: {}", e))?;
+    for a in added {
+        select_when_ready(a.provider.as_ref(), &a.response).await;
+    }
+    Ok(())
+}
 
+/// Poll the new torrent with backoff and select all its files once the provider lists them.
+async fn select_when_ready(provider: &dyn crate::providers::DebridProvider, add_response: &crate::providers::types::AddTorrentResponse) {
     let backoff_ms = [1000u64, 2000, 4000, 8000, 16000, 32000];
     let mut files_ready = false;
 
@@ -396,8 +401,6 @@ async fn auto_add(
             add_response.id
         );
     }
-
-    Ok(())
 }
 
 /// Public entry point for running a single rule on demand (used by run_watch_rule_now command)

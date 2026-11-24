@@ -52,6 +52,17 @@ function fakeServer() {
         return json(true);
       case "GET /api/auth/user":
         return json({ username: "jon", email: "", premium: true, expiration: null, points: 0, avatar: "" });
+      case "GET /api/providers/accounts":
+        return json([
+          {
+            id: "real-debrid",
+            name: "Real-Debrid",
+            auth_method: "oauth_device",
+            enabled: true,
+            authenticated: true,
+            user: { username: "jon", email: "", premium: true, expiration: null },
+          },
+        ]);
       case "GET /api/auth/status":
         return json({ authenticated: true });
       case "GET /api/downloads":

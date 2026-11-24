@@ -5,8 +5,8 @@ import type { DownloadLink, ZipDownloadStarted, ZipEntry, ZipInspection } from "
  * Read a torrent ZIP/RAR's file list remotely (HTTP Range), without downloading the archive.
  * `fileId` null: the torrent's single download link (Real-Debrid's packed RAR).
  */
-export async function inspectTorrentArchive(torrentId: string, fileId: number | null): Promise<ZipInspection> {
-  return call("inspect_torrent_archive", { torrentId, fileId });
+export async function inspectTorrentArchive(torrentId: string, fileId: number | null, provider?: string): Promise<ZipInspection> {
+  return call("inspect_torrent_archive", { torrentId, fileId, provider: provider ?? null });
 }
 
 /** Queue the given archive members as individual downloads (no extract step afterwards). */

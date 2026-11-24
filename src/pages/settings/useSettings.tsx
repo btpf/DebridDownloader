@@ -40,6 +40,8 @@ type Ctx = {
   settings: AppSettings | null;
   loading: boolean;
   applyChange(patch: Partial<AppSettings>): Promise<void>;
+  /** Re-read the settings from the backend (after a change made elsewhere, e.g. signing a provider in). */
+  reload(): Promise<void>;
   frontend: FrontendSettings;
   applyFrontend(patch: Partial<FrontendSettings>): void;
   savedField: string | null;
@@ -75,6 +77,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       latest.current = next;
       setSettings(next);
       await updateSettings(next);
+    },
+    async reload() {
+      const fresh = await getSettings();
+      latest.current = fresh;
+      setSettings(fresh);
     },
     frontend,
     applyFrontend(patch) {

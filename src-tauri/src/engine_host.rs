@@ -148,11 +148,12 @@ fn provider_display_name(id: &str) -> String {
     .to_string()
 }
 
-pub fn check_provider(source: &LinkSource, active: &str) -> Result<(), RefreshError> {
+/// The provider that can refresh `source`, which must be signed in (`signed_in` lists those).
+pub fn check_provider<'a>(source: &'a LinkSource, signed_in: &[String]) -> Result<&'a str, RefreshError> {
     match source.provider_id() {
         None => Err(RefreshError::NotRefreshable),
-        Some(p) if p != active => Err(RefreshError::ProviderMismatch(provider_display_name(p))),
-        Some(_) => Ok(()),
+        Some(p) if !signed_in.iter().any(|s| s == p) => Err(RefreshError::ProviderMismatch(provider_display_name(p))),
+        Some(p) => Ok(p),
     }
 }
 
@@ -169,9 +170,17 @@ impl<H: StateHandle> ProviderRefresher<H> {
 impl<H: StateHandle> LinkRefresher for ProviderRefresher<H> {
     async fn refresh(&self, source: &LinkSource) -> Result<RefreshedLink, RefreshError> {
         let state = self.host.app_state();
-        let active = state.provider_id.read().await.clone();
-        check_provider(source, &active)?;
-        let provider = state.get_provider().await; // clones the Arc; no lock held across .await
+        // The link's own provider, enabled or not, as long as it's still signed in.
+        let clients: Vec<(String, Arc<dyn crate::providers::DebridProvider>)> =
+            state.providers.read().await.iter().map(|(id, p)| (id.clone(), p.clone())).collect();
+        let mut signed_in = Vec::new();
+        for (id, p) in &clients {
+            if p.is_authenticated().await {
+                signed_in.push(id.clone());
+            }
+        }
+        let id = check_provider(source, &signed_in)?;
+        let provider = state.provider(id).await.ok_or(RefreshError::NotRefreshable)?;
         provider
             .refresh_link(source)
             .await
@@ -229,12 +238,13 @@ mod tests {
     #[test]
     fn provider_check() {
         let rd = LinkSource::RealDebrid { hoster_link: "x".into() };
-        assert!(check_provider(&rd, "real-debrid").is_ok());
-        assert!(matches!(check_provider(&rd, "torbox"), Err(RefreshError::ProviderMismatch(p)) if p == "Real-Debrid"));
-        assert!(matches!(check_provider(&LinkSource::Direct, "torbox"), Err(RefreshError::NotRefreshable)));
+        let s = |ids: &[&str]| ids.iter().map(|i| i.to_string()).collect::<Vec<_>>();
+        assert_eq!(check_provider(&rd, &s(&["torbox", "real-debrid"])).unwrap(), "real-debrid");
+        assert!(matches!(check_provider(&rd, &s(&["torbox"])), Err(RefreshError::ProviderMismatch(p)) if p == "Real-Debrid"));
+        assert!(matches!(check_provider(&LinkSource::Direct, &s(&["torbox"])), Err(RefreshError::NotRefreshable)));
         let ad = LinkSource::AllDebrid { hoster_link: "x".into() };
-        assert!(check_provider(&ad, "alldebrid").is_ok());
-        assert!(matches!(check_provider(&ad, "real-debrid"), Err(RefreshError::ProviderMismatch(p)) if p == "AllDebrid"));
+        assert!(check_provider(&ad, &s(&["alldebrid"])).is_ok());
+        assert!(matches!(check_provider(&ad, &s(&["real-debrid"])), Err(RefreshError::ProviderMismatch(p)) if p == "AllDebrid"));
     }
 
     #[tokio::test]

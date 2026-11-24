@@ -34,7 +34,7 @@ describe("Torrents inspector preview", () => {
     fireEvent.click(await screen.findByText("Movie.mp4", { selector: "div" }));
     const play = await screen.findAllByRole("button", { name: /^Play/ });
     fireEvent.click(play[0]);
-    expect(openPreview).toHaveBeenCalledWith("T1", 7, "Movie.mp4");
+    expect(openPreview).toHaveBeenCalledWith("T1", 7, "Movie.mp4", undefined);
     expect(document.querySelector("aside video")).toBeNull();
   });
 });

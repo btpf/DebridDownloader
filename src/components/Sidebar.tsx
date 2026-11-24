@@ -1,8 +1,8 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { useAuth } from "../hooks/useAuth";
+import { premiumDaysLeft, useAuth } from "../hooks/useAuth";
 import { useDownloadTasks } from "../hooks/useDownloadTasks";
-import { getActiveProvider } from "../api/providers";
 import { check } from "@tauri-apps/plugin-updater";
+import type { ProviderAccount } from "../types";
 import { providerName } from "../lib/providers";
 import { isActiveStatus } from "../lib/downloadStatus";
 import { cn, CountBadge, Kbd, Menu, StatusDot } from "./ui";
@@ -13,10 +13,25 @@ interface SidebarProps {
   onSearchOpen: () => void;
   onSettingsOpen: () => void;
   onAboutOpen: () => void;
+  /** Opens Settings → Account (defaults to `onSettingsOpen`). */
+  onAccountsOpen?: () => void;
   unreadWatchCount?: number;
 }
 
 type NavItem = { id: string; label: string; icon: ReactNode; onClick: () => void; badge?: number; kbd?: string };
+
+/** Green when signed in with premium, amber when signed in without it, grey when signed out. */
+function accountDot(a: ProviderAccount): "success" | "warning" | "idle" {
+  if (!a.authenticated) return "idle";
+  return a.user && !a.user.premium ? "warning" : "success";
+}
+
+function accountSummary(a: ProviderAccount): string {
+  if (!a.authenticated) return `${providerName(a.id)}: signed out`;
+  const days = premiumDaysLeft(a.user);
+  const plan = a.user ? (a.user.premium ? "Premium" : "Free") : "Signed in";
+  return [`${providerName(a.id)}: ${plan}`, days !== null ? `${days} days left` : null].filter(Boolean).join(", ");
+}
 
 const icon = (children: ReactNode) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -30,16 +45,13 @@ export default function Sidebar({
   onSearchOpen,
   onSettingsOpen,
   onAboutOpen,
+  onAccountsOpen,
   unreadWatchCount,
 }: SidebarProps) {
-  const { user, logout } = useAuth();
+  const { accounts } = useAuth();
   const { tasks } = useDownloadTasks();
-  const [providerId, setProviderId] = useState("");
   const [updateAvailable, setUpdateAvailable] = useState<string | null>(null);
-
-  useEffect(() => {
-    getActiveProvider().then(setProviderId).catch(() => {});
-  }, []);
+  const enabled = accounts.filter((a) => a.enabled);
 
   // Check for updates on mount
   useEffect(() => {
@@ -47,12 +59,6 @@ export default function Sidebar({
       if (update) setUpdateAvailable(update.version);
     }).catch(() => {});
   }, []);
-
-  const premiumDays = user?.expiration
-    ? Math.ceil(
-        (new Date(user.expiration).getTime() - Date.now()) / 86400000
-      )
-    : 0;
 
   // Same definition as the Downloads toolbar's "N active" (includes post-processing).
   const activeDownloads = tasks.filter((t) => isActiveStatus(t.status)).length;
@@ -107,8 +113,7 @@ export default function Sidebar({
     },
   ];
 
-  const plan = user ? (user.premium ? "Premium" : "Free") : "";
-  const accountLabel = [providerId ? providerName(providerId) : null, plan || null].filter(Boolean).join(" · ");
+  const accountLabel = enabled.map(accountSummary).join("; ") || "No providers enabled";
 
   return (
     <nav aria-label="Main" className="flex w-50 shrink-0 flex-col border-r border-border bg-surface px-2 py-2.5">
@@ -152,10 +157,18 @@ export default function Sidebar({
             <button
               type="button"
               className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left transition-colors duration-120 hover:bg-raised"
-              aria-label={`Account: ${accountLabel || user?.username || "account"}`}
+              aria-label={`Accounts: ${accountLabel}`}
+              title={accountLabel}
             >
-              <span className="w-full truncate text-base font-medium text-fg">{accountLabel || user?.username}</span>
-              <span className="text-sm text-fg-muted tabular">{premiumDays} days left</span>
+              {enabled.length > 0 ? (
+                enabled.map((a) => (
+                  <StatusDot key={a.id} status={accountDot(a)}>
+                    <span className="truncate text-base text-fg">{providerName(a.id)}</span>
+                  </StatusDot>
+                ))
+              ) : (
+                <span className="text-sm text-fg-muted">No providers enabled</span>
+              )}
               {updateAvailable && <StatusDot status="info"><span className="text-sm text-fg-secondary">Update {updateAvailable}</span></StatusDot>}
             </button>
           }
@@ -163,7 +176,7 @@ export default function Sidebar({
             { label: "Settings", shortcut: "Mod+,", onSelect: onSettingsOpen },
             { label: "About & updates", onSelect: onAboutOpen },
             "separator",
-            { label: "Sign out", danger: true, onSelect: () => { void logout(); } },
+            { label: "Accounts…", onSelect: onAccountsOpen ?? onSettingsOpen },
           ]}
         />
       </div>

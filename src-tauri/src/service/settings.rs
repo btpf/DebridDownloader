@@ -13,8 +13,10 @@ pub async fn get_settings(state: &AppState) -> AppSettings {
 pub async fn update_settings(
     state: &AppState,
     persistence: &Persistence,
-    settings: AppSettings,
+    mut settings: AppSettings,
 ) -> Result<(), String> {
+    // The UI sends the provider list as it sees it; store it complete and in a known shape.
+    settings.normalize_providers();
     save_app_settings(persistence, &settings)?;
     let config = settings.engine_config(state.rar_tool);
     *state.settings.write().await = settings;

@@ -1,41 +1,52 @@
 //! Tauri wrappers; the bodies live in `crate::service::auth`.
 use crate::persistence::Persistence;
-use crate::providers::types::{AuthMethod, DeviceCode, DeviceCredentials, OAuthToken, ProviderInfo, User};
+use crate::providers::types::{AuthMethod, DeviceCode, DeviceCredentials, OAuthToken, ProviderAccount, ProviderInfo, User};
 use crate::secrets::Secrets;
 use crate::service::auth as svc;
 use crate::state::AppState;
 use tauri::State;
 
-pub use crate::service::auth::create_provider;
 
-/// Save API token and set on provider (validate first, then persist)
+/// Save a provider's API token (validated first); the primary provider when `provider_id` is null
 #[tauri::command]
-pub async fn set_api_token(state: State<'_, AppState>, secrets: State<'_, Secrets>, token: String) -> Result<(), String> {
-    svc::set_api_token(&state, &**secrets, token).await
+pub async fn set_api_token(
+    persistence: State<'_, Persistence>,
+    state: State<'_, AppState>,
+    secrets: State<'_, Secrets>,
+    token: String,
+    provider_id: Option<String>,
+) -> Result<(), String> {
+    svc::set_api_token(&state, &persistence, &**secrets, token, provider_id.as_deref()).await
 }
 
-/// Load token from the secret store and set on provider
+/// Load every provider's saved token from the secret store
 #[tauri::command]
 pub async fn load_saved_token(state: State<'_, AppState>, secrets: State<'_, Secrets>) -> Result<bool, String> {
     svc::load_saved_token(&state, &**secrets).await
 }
 
-/// Clear stored token
+/// Sign a provider out (every provider when `provider_id` is null)
 #[tauri::command]
-pub async fn logout(state: State<'_, AppState>, secrets: State<'_, Secrets>) -> Result<(), String> {
-    svc::logout(&state, &**secrets).await
+pub async fn logout(state: State<'_, AppState>, secrets: State<'_, Secrets>, provider_id: Option<String>) -> Result<(), String> {
+    svc::logout(&state, &**secrets, provider_id.as_deref()).await
 }
 
-/// Check if we're authenticated
+/// Check if any provider is signed in
 #[tauri::command]
 pub async fn is_authenticated(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(svc::is_authenticated(&state).await)
 }
 
-/// Get current user info
+/// A provider's account (the primary provider when `provider_id` is null)
 #[tauri::command]
-pub async fn get_user(state: State<'_, AppState>, secrets: State<'_, Secrets>) -> Result<User, String> {
-    svc::get_user(&state, &**secrets).await
+pub async fn get_user(state: State<'_, AppState>, secrets: State<'_, Secrets>, provider_id: Option<String>) -> Result<User, String> {
+    svc::get_user(&state, &**secrets, provider_id.as_deref()).await
+}
+
+/// Every provider in priority order, enabled or not, signed in or not
+#[tauri::command]
+pub async fn get_provider_accounts(state: State<'_, AppState>) -> Result<Vec<ProviderAccount>, String> {
+    Ok(svc::get_provider_accounts(&state).await)
 }
 
 // ── OAuth2 Device Flow (Real-Debrid specific) ──
@@ -56,13 +67,14 @@ pub async fn oauth_poll_credentials(
 
 #[tauri::command]
 pub async fn oauth_get_token(
+    persistence: State<'_, Persistence>,
     state: State<'_, AppState>,
     secrets: State<'_, Secrets>,
     client_id: String,
     client_secret: String,
     device_code: String,
 ) -> Result<OAuthToken, String> {
-    svc::oauth_get_token(&state, &**secrets, &client_id, &client_secret, &device_code).await
+    svc::oauth_get_token(&state, &persistence, &**secrets, &client_id, &client_secret, &device_code).await
 }
 
 // ── Provider management ──
@@ -73,8 +85,8 @@ pub async fn get_available_providers() -> Result<Vec<ProviderInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn get_auth_method(state: State<'_, AppState>) -> Result<AuthMethod, String> {
-    Ok(svc::get_auth_method(&state).await)
+pub async fn get_auth_method(state: State<'_, AppState>, provider_id: Option<String>) -> Result<AuthMethod, String> {
+    svc::get_auth_method(&state, provider_id.as_deref()).await
 }
 
 #[tauri::command]

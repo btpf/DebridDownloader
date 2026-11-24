@@ -260,7 +260,7 @@ async fn refresh_or_fail(job: &mut Job, deps: &TransferDeps, tx: &UpdateTx, refr
             let _ = tx.send(TransferUpdate::Url(l.url));
             Ok(())
         }
-        Err(RefreshError::ProviderMismatch(p)) => Err(TransferError::Fatal(format!("Switch back to {p} to resume"))),
+        Err(RefreshError::ProviderMismatch(p)) => Err(TransferError::Fatal(format!("Sign in to {p} to resume"))),
         Err(e) => Err(TransferError::Fatal(format!("Link expired and couldn't be refreshed: {e}"))),
     }
 }

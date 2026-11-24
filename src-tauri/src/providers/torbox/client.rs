@@ -97,7 +97,7 @@ impl TorBoxClient {
     fn created_id(data: TbCreateTorrent) -> Result<shared::AddTorrentResponse, shared::ProviderError> {
         data.torrent_id
             .or(data.queued_id)
-            .map(|id| shared::AddTorrentResponse { id: id.to_string() })
+            .map(|id| shared::AddTorrentResponse { id: id.to_string(), provider: String::new() })
             .ok_or_else(|| shared::ProviderError::Other("TorBox returned no torrent id".to_string()))
     }
 
@@ -144,6 +144,8 @@ fn map_torrent(t: TbTorrent) -> shared::Torrent {
         ended: None,
         speed: t.download_speed,
         seeders: t.seeds,
+        provider: String::new(),
+        copies: Vec::new(),
     }
 }
 
@@ -171,6 +173,7 @@ fn map_torrent_detail(t: TbTorrent) -> shared::TorrentInfo {
         ended: None,
         speed: t.download_speed,
         seeders: t.seeds,
+        provider: String::new(),
     }
 }
 

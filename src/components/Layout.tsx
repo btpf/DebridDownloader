@@ -4,6 +4,7 @@ import { subscribe } from "../api/transport";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import Sidebar from "./Sidebar";
 import Toast from "./Toast";
+import TorrentDropZone from "./TorrentDropZone";
 import { DownloadTasksProvider } from "../hooks/useDownloadTasks";
 import { useAppearance } from "../hooks/useAppearance";
 import { useShortcut } from "../hooks/useShortcut";
@@ -96,12 +97,14 @@ export default function Layout() {
   return (
     <DownloadTasksProvider>
       <div className="flex h-screen overflow-hidden bg-bg text-fg">
+        <TorrentDropZone />
         <Sidebar
           activeView={activeView}
           onNavigate={handleNavigate}
           onSearchOpen={() => navigate("/search")}
           onSettingsOpen={() => navigate("/settings")}
           onAboutOpen={() => navigate("/about")}
+          onAccountsOpen={() => navigate("/settings/account")}
           unreadWatchCount={unreadWatchCount}
         />
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-bg">

@@ -42,9 +42,8 @@ pub struct ZipDownloadStarted {
 /// haven't been verified, so the feature stays off for them.
 pub(crate) const SUPPORTED_PROVIDER: &str = "real-debrid";
 
-async fn require_supported_provider(state: &AppState) -> Result<(), String> {
-    let active = state.provider_id.read().await.clone();
-    if active != SUPPORTED_PROVIDER {
+fn require_supported_provider(provider_id: Option<&str>) -> Result<(), String> {
+    if provider_id != Some(SUPPORTED_PROVIDER) {
         return Err("Downloading an archive's contents is only available with Real-Debrid".into());
     }
     Ok(())
@@ -77,9 +76,10 @@ pub async fn inspect_torrent_archive(
     state: State<'_, AppState>,
     torrent_id: String,
     file_id: Option<u64>,
+    provider: Option<String>,
 ) -> Result<ZipInspection, String> {
-    require_supported_provider(&state).await?;
-    let provider = state.get_provider().await;
+    let (provider_id, provider) = state.provider_for(provider.as_deref()).await?;
+    require_supported_provider(Some(&provider_id))?;
     let link = match file_id {
         Some(id) => provider.get_download_link_for_file(&torrent_id, id).await.map_err(|e| e.to_string())?,
         None => {
@@ -148,7 +148,7 @@ pub async fn start_archive_contents_download(
     destination_folder: String,
     torrent_name: Option<String>,
 ) -> Result<ZipDownloadStarted, String> {
-    require_supported_provider(&state).await?;
+    require_supported_provider(link.source.provider_id())?;
     let settings = state.settings.read().await.clone();
     if settings.symlink_mode {
         return Err("Downloading an archive's contents isn't available in symlink mode".into());

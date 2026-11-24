@@ -10,7 +10,7 @@ use crate::providers::types::*;
 use crate::providers::DebridProvider;
 use crate::scrapers::TrackerConfig;
 use crate::secrets::{FileStore, SecretStore};
-use crate::state::{AppSettings, AppState};
+use crate::state::{AppSettings, AppState, ProviderPref};
 use crate::watchlist::{MatchStatus, RuleType, WatchAction, WatchMatch, WatchRule};
 use serde_json::json;
 use std::any::Any;
@@ -35,10 +35,20 @@ fn env() -> Env {
 }
 
 impl Env {
+    /// Install `provider` as provider `id` and enable it after the ones installed before it.
     async fn with_provider(self, id: &str, provider: Arc<FakeProvider>) -> Self {
-        *self.state.provider.write().await = provider;
-        *self.state.provider_id.write().await = id.to_string();
+        self.state.install_provider(id, provider).await;
+        {
+            let mut settings = self.state.settings.write().await;
+            settings.providers.retain(|p| p.id != id && p.enabled);
+            settings.providers.push(ProviderPref { id: id.into(), enabled: true });
+            settings.normalize_providers();
+        }
         self
+    }
+
+    async fn set_add_to_all(&self, on: bool) {
+        self.state.settings.write().await.add_to_all_providers = on;
     }
 
     fn stored(&self, key: &str) -> Option<serde_json::Value> {
@@ -52,11 +62,16 @@ struct FakeProvider {
     calls: Mutex<Vec<String>>,
     good_token: String,
     selected: Mutex<Option<(String, Vec<u64>)>>,
+    /// Adding a torrent fails with this message.
+    add_error: Option<String>,
 }
 
 impl FakeProvider {
     fn new(good_token: &str) -> Arc<Self> {
         Arc::new(Self { good_token: good_token.into(), ..Default::default() })
+    }
+    fn failing_adds(message: &str) -> Arc<Self> {
+        Arc::new(Self { good_token: "good".into(), add_error: Some(message.into()), ..Default::default() })
     }
     fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
@@ -79,6 +94,8 @@ fn torrent(id: &str) -> Torrent {
         ended: None,
         speed: None,
         seeders: None,
+        provider: String::new(),
+        copies: Vec::new(),
     }
 }
 
@@ -111,11 +128,17 @@ impl DebridProvider for FakeProvider {
     }
     async fn add_magnet(&self, magnet: &str) -> Result<AddTorrentResponse, ProviderError> {
         self.log(format!("magnet:{}", magnet));
-        Ok(AddTorrentResponse { id: "new".into() })
+        if let Some(e) = &self.add_error {
+            return Err(ProviderError::Other(e.clone()));
+        }
+        Ok(AddTorrentResponse { id: "new".into(), provider: String::new() })
     }
     async fn add_torrent_file(&self, bytes: &[u8]) -> Result<AddTorrentResponse, ProviderError> {
         self.log(format!("file:{}", bytes.len()));
-        Ok(AddTorrentResponse { id: "file".into() })
+        if let Some(e) = &self.add_error {
+            return Err(ProviderError::Other(e.clone()));
+        }
+        Ok(AddTorrentResponse { id: "file".into(), provider: String::new() })
     }
     async fn select_files(&self, id: &str, file_ids: &[u64]) -> Result<(), ProviderError> {
         *self.selected.lock().unwrap() = Some((id.into(), file_ids.to_vec()));
@@ -200,18 +223,49 @@ async fn update_settings_does_not_apply_when_persisting_fails() {
 async fn set_api_token_saves_only_a_validated_token_under_the_provider_key() {
     let env = env().with_provider("torbox", FakeProvider::new("good")).await;
 
-    let err = auth::set_api_token(&env.state, &env.secrets, "bad".into()).await.unwrap_err();
+    let set = |token: &str, provider: Option<&'static str>| {
+        auth::set_api_token(&env.state, &env.persistence, &env.secrets, token.into(), provider)
+    };
+
+    let err = set("bad", None).await.unwrap_err();
     assert_eq!(err, "Bad token");
     assert_eq!(env.secrets.get("torbox.api_token").unwrap(), None);
     assert!(!auth::load_saved_token(&env.state, &env.secrets).await.unwrap());
-    assert_eq!(auth::get_user(&env.state, &env.secrets).await.unwrap_err(), "No saved token");
+    assert_eq!(auth::get_user(&env.state, &env.secrets, None).await.unwrap_err(), "No saved token");
 
-    auth::set_api_token(&env.state, &env.secrets, "good".into()).await.unwrap();
+    set("good", None).await.unwrap();
     assert_eq!(env.secrets.get("torbox.api_token").unwrap().as_deref(), Some("good"));
     assert!(auth::load_saved_token(&env.state, &env.secrets).await.unwrap());
-    assert_eq!(auth::get_user(&env.state, &env.secrets).await.unwrap().username, "u");
+    assert_eq!(auth::get_user(&env.state, &env.secrets, None).await.unwrap().username, "u");
+    assert_eq!(auth::get_user(&env.state, &env.secrets, Some("torbox")).await.unwrap().username, "u");
     assert!(auth::is_authenticated(&env.state).await);
-    assert_eq!(auth::get_auth_method(&env.state).await, AuthMethod::ApiKey);
+    assert_eq!(auth::get_auth_method(&env.state, None).await, Ok(AuthMethod::ApiKey));
+    assert_eq!(auth::get_auth_method(&env.state, Some("real-debrid")).await, Ok(AuthMethod::OAuthDevice));
+    assert!(auth::get_auth_method(&env.state, Some("nope")).await.is_err());
+}
+
+#[tokio::test]
+async fn signing_in_to_a_named_provider_saves_its_token_and_enables_it() {
+    let env = env().with_provider("torbox", FakeProvider::new("good")).await;
+    env.state.install_provider("alldebrid", FakeProvider::new("ad")).await;
+    assert!(!env.state.provider_prefs().await.iter().any(|p| p.id == "alldebrid" && p.enabled));
+
+    auth::set_api_token(&env.state, &env.persistence, &env.secrets, "ad".into(), Some("alldebrid")).await.unwrap();
+    assert_eq!(env.secrets.get("alldebrid.api_token").unwrap().as_deref(), Some("ad"));
+    assert_eq!(env.secrets.get("torbox.api_token").unwrap(), None);
+    let prefs = env.state.provider_prefs().await;
+    assert_eq!(prefs[0], ProviderPref { id: "torbox".into(), enabled: true });
+    assert!(prefs.iter().any(|p| p.id == "alldebrid" && p.enabled));
+    let stored = env.stored(SETTINGS_KEY).unwrap();
+    assert!(stored["providers"].as_array().unwrap().iter().any(|p| p["id"] == "alldebrid" && p["enabled"] == true));
+
+    let accounts = auth::get_provider_accounts(&env.state).await;
+    assert_eq!(accounts.len(), 4);
+    let ad = accounts.iter().find(|a| a.id == "alldebrid").unwrap();
+    assert!(ad.enabled && ad.authenticated);
+    assert_eq!(ad.name, "AllDebrid");
+    assert_eq!(ad.user.as_ref().unwrap().username, "u");
+    assert_eq!(accounts[0].id, "torbox");
 }
 
 #[tokio::test]
@@ -222,13 +276,20 @@ async fn logout_clears_every_credential_and_resets_the_provider() {
     }
     env.secrets.set("torbox.api_token", "keep").unwrap();
 
-    auth::logout(&env.state, &env.secrets).await.unwrap();
+    auth::logout(&env.state, &env.secrets, Some("real-debrid")).await.unwrap();
 
     for key in ["api_token", "refresh_token", "oauth_client_id", "oauth_client_secret"] {
         assert_eq!(env.secrets.get(&format!("real-debrid.{}", key)).unwrap(), None, "{}", key);
     }
     assert_eq!(env.secrets.get("torbox.api_token").unwrap().as_deref(), Some("keep"));
-    assert!(env.state.get_provider().await.as_any().is::<RdClient>());
+    assert!(env.state.provider("real-debrid").await.unwrap().as_any().is::<RdClient>());
+    // Still enabled; only signed out.
+    assert!(env.state.provider_prefs().await.iter().any(|p| p.id == "real-debrid" && p.enabled));
+
+    // No provider named: every provider is signed out.
+    auth::logout(&env.state, &env.secrets, None).await.unwrap();
+    assert_eq!(env.secrets.get("torbox.api_token").unwrap(), None);
+    assert!(!auth::is_authenticated(&env.state).await);
 }
 
 #[tokio::test]
@@ -250,10 +311,11 @@ async fn switch_provider_persists_the_choice() {
 
 #[tokio::test]
 async fn oauth_needs_real_debrid() {
-    let env = env().with_provider("torbox", FakeProvider::new("good")).await;
+    // A Real-Debrid slot that isn't an `RdClient` (no network is touched).
+    let env = env().with_provider("real-debrid", FakeProvider::new("good")).await;
     assert_eq!(auth::oauth_start(&env.state).await.unwrap_err(), "OAuth is only supported for Real-Debrid");
     assert!(auth::oauth_poll_credentials(&env.state, &env.secrets, "code").await.is_err());
-    assert!(auth::oauth_get_token(&env.state, &env.secrets, "id", "secret", "code").await.is_err());
+    assert!(auth::oauth_get_token(&env.state, &env.persistence, &env.secrets, "id", "secret", "code").await.is_err());
 }
 
 // ── Torrents ────────────────────────────────────────────────────────
@@ -267,12 +329,12 @@ async fn torrent_commands_go_to_the_active_provider() {
     torrents::list_torrents(&env.state, Some(2), Some(50)).await.unwrap();
     assert_eq!(torrents::add_magnet(&env.state, "magnet:?xt=urn:btih:abc").await.unwrap().id, "new");
     assert_eq!(torrents::add_torrent_file(&env.state, &[1, 2, 3]).await.unwrap().id, "file");
-    torrents::delete_torrent(&env.state, "t1").await.unwrap();
-    assert_eq!(torrents::get_torrent_info(&env.state, "zz").await.unwrap_err(), "no info for zz");
+    torrents::delete_torrent(&env.state, "t1", None).await.unwrap();
+    assert_eq!(torrents::get_torrent_info(&env.state, "zz", Some("torbox")).await.unwrap_err(), "no info for zz");
 
-    torrents::select_torrent_files(&env.state, "t1", "3, 1,bad").await.unwrap();
+    torrents::select_torrent_files(&env.state, "t1", "3, 1,bad", None).await.unwrap();
     assert_eq!(fake.selected.lock().unwrap().clone(), Some(("t1".to_string(), vec![3, 1])));
-    torrents::select_torrent_files(&env.state, "t2", "all").await.unwrap();
+    torrents::select_torrent_files(&env.state, "t2", "all", Some("torbox")).await.unwrap();
     assert_eq!(fake.selected.lock().unwrap().clone(), Some(("t2".to_string(), vec![])));
 
     assert_eq!(
@@ -282,12 +344,190 @@ async fn torrent_commands_go_to_the_active_provider() {
 }
 
 #[tokio::test]
+async fn adding_falls_back_down_the_priority_list() {
+    let first = FakeProvider::failing_adds("Torrent too big");
+    let second = FakeProvider::new("good");
+    let third = FakeProvider::new("good");
+    let env = env()
+        .with_provider("torbox", first.clone())
+        .await
+        .with_provider("alldebrid", second.clone())
+        .await
+        .with_provider("premiumize", third.clone())
+        .await;
+
+    let added = torrents::add_magnet(&env.state, "magnet:?xt=urn:btih:abc").await.unwrap();
+    assert_eq!((added.id.as_str(), added.provider.as_str()), ("new", "alldebrid"));
+    // Every file is selected where it landed, so the torrent starts.
+    assert_eq!(second.selected.lock().unwrap().clone(), Some(("new".to_string(), vec![])));
+    assert_eq!(first.calls(), vec!["magnet:magnet:?xt=urn:btih:abc"]);
+    assert!(third.calls().is_empty(), "stops at the first provider that takes it");
+}
+
+#[tokio::test]
+async fn adding_fails_only_when_every_provider_refuses() {
+    let env = env()
+        .with_provider("torbox", FakeProvider::failing_adds("Too big"))
+        .await
+        .with_provider("alldebrid", FakeProvider::failing_adds("Not cached"))
+        .await;
+    let err = torrents::add_torrent_file(&env.state, &[1]).await.unwrap_err();
+    assert_eq!(err, "TorBox: Too big; AllDebrid: Not cached");
+
+    let env = self::env().with_provider("torbox", FakeProvider::failing_adds("Too big")).await;
+    assert_eq!(torrents::add_magnet(&env.state, "m").await.unwrap_err(), "Too big");
+}
+
+#[tokio::test]
+async fn add_to_all_providers_adds_everywhere_and_skips_disabled_ones() {
+    let a = FakeProvider::new("good");
+    let b = FakeProvider::failing_adds("Not cached");
+    let c = FakeProvider::new("good");
+    let disabled = FakeProvider::new("good");
+    let env = env()
+        .with_provider("torbox", a.clone())
+        .await
+        .with_provider("alldebrid", b.clone())
+        .await
+        .with_provider("premiumize", c.clone())
+        .await;
+    env.state.install_provider("real-debrid", disabled.clone()).await;
+    env.set_add_to_all(true).await;
+
+    let added = torrents::add_routed(&env.state, torrents::TorrentSource::Magnet("m")).await.unwrap();
+    let landed: Vec<&str> = added.iter().map(|a| a.response.provider.as_str()).collect();
+    assert_eq!(landed, ["torbox", "premiumize"]);
+    assert_eq!(b.calls(), vec!["magnet:m"]);
+    assert!(disabled.calls().is_empty());
+
+    let first = torrents::add_magnet(&env.state, "m").await.unwrap();
+    assert_eq!(first.provider, "torbox");
+    assert_eq!(c.selected.lock().unwrap().clone(), Some(("new".to_string(), vec![])));
+}
+
+#[tokio::test]
+async fn listing_merges_enabled_providers_and_tags_each_torrent() {
+    let env = env()
+        .with_provider("torbox", FakeProvider::new("good"))
+        .await
+        .with_provider("alldebrid", FakeProvider::new("good"))
+        .await;
+    env.state.install_provider("premiumize", FakeProvider::new("good")).await; // not enabled
+
+    let list = torrents::list_torrents(&env.state, None, None).await.unwrap();
+    // Both fakes hold the same torrent (same hash), so it's one row with two copies.
+    assert_eq!(list.len(), 1);
+    let copies: Vec<&str> = list[0].copies.iter().map(|c| c.provider.as_str()).collect();
+    assert_eq!(copies, ["torbox", "alldebrid"]);
+    assert_eq!(list[0].provider, "torbox");
+
+    let none = self::env();
+    {
+        let mut s = none.state.settings.write().await;
+        s.providers = vec![ProviderPref { id: "real-debrid".into(), enabled: false }];
+    }
+    assert!(torrents::list_torrents(&none.state, None, None).await.unwrap_err().contains("No debrid provider"));
+}
+
+fn listed(id: &str, name: &str, hash: &str, status: &str) -> Torrent {
+    Torrent { filename: name.into(), hash: hash.into(), status: status.into(), ..torrent(id) }
+}
+
+#[test]
+fn merging_matches_on_the_hash_first_then_on_the_name() {
+    let rows = torrents::merge_torrents(vec![
+        (
+            "real-debrid".into(),
+            vec![
+                listed("rd1", "Show S01", "ABC", "downloading"),
+                listed("rd2", "Movie", "", "downloaded"),
+                listed("rd3", "Same Name", "111", "downloaded"),
+            ],
+        ),
+        (
+            "alldebrid".into(),
+            vec![
+                // Same hash, other name and case: same torrent.
+                listed("ad1", "show.s01", "abc", "downloaded"),
+                // No hash: matched by name (case and spaces ignored).
+                listed("ad2", " movie ", "", "downloaded"),
+                // Same name, different hash: a different torrent.
+                listed("ad3", "Same Name", "222", "downloaded"),
+                // A second copy of rd1 on the same provider stays its own row.
+                listed("ad4", "Show S01", "abc", "downloaded"),
+            ],
+        ),
+    ]);
+
+    let summary: Vec<(String, Vec<(String, String)>)> = rows
+        .iter()
+        .map(|r| (r.id.clone(), r.copies.iter().map(|c| (c.provider.clone(), c.id.clone())).collect()))
+        .collect();
+    let pair = |p: &str, id: &str| (p.to_string(), id.to_string());
+    assert_eq!(
+        summary,
+        vec![
+            // rd1 is still downloading, so the row acts on AllDebrid's ready copy.
+            ("ad1".to_string(), vec![pair("real-debrid", "rd1"), pair("alldebrid", "ad1")]),
+            ("rd2".to_string(), vec![pair("real-debrid", "rd2"), pair("alldebrid", "ad2")]),
+            ("rd3".to_string(), vec![pair("real-debrid", "rd3")]),
+            ("ad3".to_string(), vec![pair("alldebrid", "ad3")]),
+            ("ad4".to_string(), vec![pair("alldebrid", "ad4")]),
+        ]
+    );
+    assert_eq!(rows[0].provider, "alldebrid");
+    assert_eq!(rows[0].status, "downloaded");
+    assert_eq!(rows[0].copies[0].status, "downloading");
+}
+
+#[test]
+fn a_merged_row_keeps_a_hash_from_any_copy() {
+    let rows = torrents::merge_torrents(vec![
+        ("torbox".into(), vec![listed("t1", "Album", "", "downloaded")]),
+        ("premiumize".into(), vec![listed("p1", "Album", "FFF", "downloaded")]),
+    ]);
+    assert_eq!(rows.len(), 1);
+    assert_eq!((rows[0].id.as_str(), rows[0].hash.as_str()), ("t1", "FFF"));
+}
+
+#[test]
+fn provider_prefs_come_from_the_legacy_provider_and_stay_complete() {
+    let mut legacy = AppSettings { provider: "torbox".into(), ..AppSettings::default() };
+    let prefs = legacy.provider_prefs();
+    assert_eq!(prefs[0], ProviderPref { id: "torbox".into(), enabled: true });
+    assert_eq!(prefs.len(), 4);
+    assert!(prefs[1..].iter().all(|p| !p.enabled));
+
+    // Unknown and repeated ids are dropped; missing ones are added, disabled.
+    legacy.providers = vec![
+        ProviderPref { id: "alldebrid".into(), enabled: true },
+        ProviderPref { id: "nope".into(), enabled: true },
+        ProviderPref { id: "alldebrid".into(), enabled: false },
+        ProviderPref { id: "torbox".into(), enabled: false },
+    ];
+    legacy.normalize_providers();
+    let ids: Vec<&str> = legacy.providers.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(ids, ["alldebrid", "torbox", "real-debrid", "premiumize"]);
+    assert!(legacy.providers[0].enabled && !legacy.providers[1].enabled);
+    assert_eq!(legacy.provider, "alldebrid");
+
+    // A blob from before multi-provider support still loads.
+    let old: AppSettings = serde_json::from_value(json!({
+        "download_folder": null, "max_concurrent_downloads": 3, "create_torrent_subfolders": true,
+        "theme": "dark", "provider": "premiumize"
+    }))
+    .unwrap();
+    assert!(!old.add_to_all_providers);
+    assert_eq!(old.provider_prefs()[0], ProviderPref { id: "premiumize".into(), enabled: true });
+}
+
+#[tokio::test]
 async fn links_history_and_cache_go_to_the_active_provider() {
     let fake = FakeProvider::new("good");
     let env = env().with_provider("torbox", fake.clone()).await;
 
-    downloads::unrestrict_torrent_links(&env.state, "t1", None).await.unwrap();
-    let links = downloads::unrestrict_torrent_links(&env.state, "t1", Some(vec![4, 5])).await.unwrap();
+    downloads::unrestrict_torrent_links(&env.state, "t1", None, None).await.unwrap();
+    let links = downloads::unrestrict_torrent_links(&env.state, "t1", Some(vec![4, 5]), Some("torbox")).await.unwrap();
     assert_eq!(links.iter().map(|l| l.filename.as_str()).collect::<Vec<_>>(), ["f4", "f5"]);
     downloads::get_download_history(&env.state, None, Some(10)).await.unwrap();
     assert_eq!(fake.calls(), vec!["links:t1", "link:t1:4", "link:t1:5", "history:1:10"]);

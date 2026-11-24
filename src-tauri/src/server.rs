@@ -145,6 +145,7 @@ pub fn router(s: ServerState) -> Router {
         .route("/api/auth/oauth/credentials", post(oauth_poll_credentials))
         .route("/api/auth/oauth/token", post(oauth_get_token))
         .route("/api/providers", get(list_providers))
+        .route("/api/providers/accounts", get(provider_accounts))
         // Search and trackers
         .route("/api/search", get(search_torrents))
         .route("/api/trackers", get(get_tracker_configs))
@@ -655,8 +656,19 @@ async fn list_torrents(State(s): State<ServerState>, Params(q): Params<PageQuery
     Ok(Json(service::torrents::list_torrents(&s.state, q.page, q.limit).await?))
 }
 
-async fn get_torrent_info(State(s): State<ServerState>, Path(id): Path<String>) -> ApiResult<TorrentInfo> {
-    Ok(Json(service::torrents::get_torrent_info(&s.state, &id).await?))
+/// `?provider=<id>`: which provider a torrent id belongs to (the primary one when left out).
+#[derive(Deserialize)]
+struct ProviderQuery {
+    #[serde(default)]
+    provider: Option<String>,
+}
+
+async fn get_torrent_info(
+    State(s): State<ServerState>,
+    Path(id): Path<String>,
+    Params(q): Params<ProviderQuery>,
+) -> ApiResult<TorrentInfo> {
+    Ok(Json(service::torrents::get_torrent_info(&s.state, &id, q.provider.as_deref()).await?))
 }
 
 #[derive(Deserialize)]
@@ -683,6 +695,8 @@ async fn add_torrent_file(State(s): State<ServerState>, Body(body): Body<Torrent
 struct SelectFilesRequest {
     /// `"all"` or a comma-separated id list.
     file_ids: String,
+    #[serde(default)]
+    provider: Option<String>,
 }
 
 async fn select_torrent_files(
@@ -690,11 +704,11 @@ async fn select_torrent_files(
     Path(id): Path<String>,
     Body(body): Body<SelectFilesRequest>,
 ) -> ApiResult<()> {
-    done(service::torrents::select_torrent_files(&s.state, &id, &body.file_ids)).await
+    done(service::torrents::select_torrent_files(&s.state, &id, &body.file_ids, body.provider.as_deref())).await
 }
 
-async fn delete_torrent(State(s): State<ServerState>, Path(id): Path<String>) -> ApiResult<()> {
-    done(service::torrents::delete_torrent(&s.state, &id)).await
+async fn delete_torrent(State(s): State<ServerState>, Path(id): Path<String>, Params(q): Params<ProviderQuery>) -> ApiResult<()> {
+    done(service::torrents::delete_torrent(&s.state, &id, q.provider.as_deref())).await
 }
 
 #[derive(Deserialize)]
@@ -702,6 +716,8 @@ async fn delete_torrent(State(s): State<ServerState>, Path(id): Path<String>) ->
 struct UnrestrictRequest {
     #[serde(default)]
     file_ids: Option<Vec<u64>>,
+    #[serde(default)]
+    provider: Option<String>,
 }
 
 /// `unrestrict_torrent_links`: download links for torrent `id` (only `fileIds` when given).
@@ -710,7 +726,8 @@ async fn unrestrict_torrent_links(
     Path(id): Path<String>,
     Body(body): Body<UnrestrictRequest>,
 ) -> ApiResult<Vec<DownloadLink>> {
-    Ok(Json(service::downloads::unrestrict_torrent_links(&s.state, &id, body.file_ids).await?))
+    let links = service::downloads::unrestrict_torrent_links(&s.state, &id, body.file_ids, body.provider.as_deref()).await?;
+    Ok(Json(links))
 }
 
 // Auth and providers
@@ -723,28 +740,45 @@ async fn auth_status(State(s): State<ServerState>) -> ApiResult<serde_json::Valu
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct TokenRequest {
     token: String,
+    #[serde(default)]
+    provider_id: Option<String>,
 }
 
 async fn set_api_token(State(s): State<ServerState>, Body(body): Body<TokenRequest>) -> ApiResult<()> {
-    done(service::auth::set_api_token(&s.state, &*s.secrets, body.token)).await
+    let provider = body.provider_id.as_deref();
+    done(service::auth::set_api_token(&s.state, &s.persistence, &*s.secrets, body.token, provider)).await
+}
+
+/// `?providerId=<id>`: the provider an auth route is about (the primary one, or for `logout`
+/// every one, when left out).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderIdQuery {
+    #[serde(default)]
+    provider_id: Option<String>,
 }
 
 async fn load_saved_token(State(s): State<ServerState>) -> ApiResult<bool> {
     Ok(Json(service::auth::load_saved_token(&s.state, &*s.secrets).await?))
 }
 
-async fn logout(State(s): State<ServerState>) -> ApiResult<()> {
-    done(service::auth::logout(&s.state, &*s.secrets)).await
+async fn logout(State(s): State<ServerState>, Params(q): Params<ProviderIdQuery>) -> ApiResult<()> {
+    done(service::auth::logout(&s.state, &*s.secrets, q.provider_id.as_deref())).await
 }
 
-async fn get_user(State(s): State<ServerState>) -> ApiResult<User> {
-    Ok(Json(service::auth::get_user(&s.state, &*s.secrets).await?))
+async fn get_user(State(s): State<ServerState>, Params(q): Params<ProviderIdQuery>) -> ApiResult<User> {
+    Ok(Json(service::auth::get_user(&s.state, &*s.secrets, q.provider_id.as_deref()).await?))
 }
 
-async fn get_auth_method(State(s): State<ServerState>) -> ApiResult<AuthMethod> {
-    Ok(Json(service::auth::get_auth_method(&s.state).await))
+async fn get_auth_method(State(s): State<ServerState>, Params(q): Params<ProviderIdQuery>) -> ApiResult<AuthMethod> {
+    Ok(Json(service::auth::get_auth_method(&s.state, q.provider_id.as_deref()).await?))
+}
+
+async fn provider_accounts(State(s): State<ServerState>) -> ApiResult<Vec<crate::providers::types::ProviderAccount>> {
+    Ok(Json(service::auth::get_provider_accounts(&s.state).await))
 }
 
 #[derive(Deserialize)]
@@ -786,6 +820,7 @@ struct OAuthTokenRequest {
 async fn oauth_get_token(State(s): State<ServerState>, Body(body): Body<OAuthTokenRequest>) -> ApiResult<OAuthToken> {
     let token = service::auth::oauth_get_token(
         &s.state,
+        &s.persistence,
         &*s.secrets,
         &body.client_id,
         &body.client_secret,
@@ -1027,6 +1062,8 @@ mod tests {
             ended: None,
             speed: None,
             seeders: None,
+            provider: String::new(),
+            copies: Vec::new(),
         }
     }
 
@@ -1071,15 +1108,16 @@ mod tests {
                 ended: None,
                 speed: None,
                 seeders: None,
+                provider: String::new(),
             })
         }
         async fn add_magnet(&self, magnet: &str) -> Result<AddTorrentResponse, ProviderError> {
             self.log(format!("magnet:{}", magnet));
-            Ok(AddTorrentResponse { id: "new".into() })
+            Ok(AddTorrentResponse { id: "new".into(), provider: String::new() })
         }
         async fn add_torrent_file(&self, bytes: &[u8]) -> Result<AddTorrentResponse, ProviderError> {
             self.log(format!("file:{}", bytes.len()));
-            Ok(AddTorrentResponse { id: "file".into() })
+            Ok(AddTorrentResponse { id: "file".into(), provider: String::new() })
         }
         async fn select_files(&self, id: &str, file_ids: &[u64]) -> Result<(), ProviderError> {
             *self.selected.lock().unwrap() = Some((id.into(), file_ids.to_vec()));
@@ -1202,8 +1240,15 @@ mod tests {
         /// Put back what routes change: the fake provider active as `torbox` with its token
         /// saved, one watch rule `r1`, and one tracker on the stub server.
         async fn prime(&self) {
-            *self.state.provider.write().await = self.fake.clone();
-            *self.state.provider_id.write().await = "torbox".into();
+            // Real-Debrid is the fake too, so the OAuth routes fail before reaching the network.
+            self.state.install_provider("torbox", self.fake.clone()).await;
+            self.state.install_provider("real-debrid", self.fake.clone()).await;
+            {
+                let mut settings = self.state.settings.write().await;
+                settings.providers = vec![crate::state::ProviderPref { id: "torbox".into(), enabled: true }];
+                settings.add_to_all_providers = false;
+                settings.normalize_providers();
+            }
             self.secrets.set("torbox.api_token", GOOD).unwrap();
             *self.state.watch_rules.write().await = vec![rule("r1")];
             self.persistence.set_json(crate::persistence::TRACKER_CONFIGS_KEY, &[tracker(&self.stub)]).unwrap();
@@ -1403,6 +1448,7 @@ mod tests {
             (post.clone(), "/api/auth/oauth/credentials", Some(json!({ "deviceCode": "dc" }))),
             (post.clone(), "/api/auth/oauth/token", Some(json!({ "clientId": "id", "clientSecret": "s", "deviceCode": "dc" }))),
             (get.clone(), "/api/providers", None),
+            (get.clone(), "/api/providers/accounts", None),
             // Search and trackers
             (get.clone(), "/api/search?query=show&sortBy=seeders", None),
             (get.clone(), "/api/trackers", None),

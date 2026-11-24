@@ -173,7 +173,7 @@ impl Headless {
         let _ = state.engine.set(engine);
 
         if let Ok(true) = crate::service::auth::load_saved_token(&state, &*secrets).await {
-            log::info!("Loaded the saved {} token", state.provider_id.read().await);
+            log::info!("Loaded the saved provider tokens");
         }
 
         let (token, generated) = server::ensure_auth_token(&*secrets)?;
@@ -215,12 +215,9 @@ impl Headless {
 async fn load_persisted(state: &AppState, persistence: &Persistence) -> Result<(), String> {
     if let Some(val) = persistence.get(SETTINGS_KEY)? {
         match serde_json::from_value::<AppSettings>(val) {
-            Ok(loaded) => {
-                *state.provider_id.write().await = loaded.provider.clone();
-                match crate::service::auth::create_provider(&loaded.provider) {
-                    Ok(p) => *state.provider.write().await = p,
-                    Err(e) => log::warn!("Persisted provider '{}' invalid, keeping default: {}", loaded.provider, e),
-                }
+            Ok(mut loaded) => {
+                // Older blobs have one `provider`; this turns it into the priority list.
+                loaded.normalize_providers();
                 *state.settings.write().await = loaded;
             }
             Err(e) => log::warn!("Failed to deserialize persisted AppSettings, using defaults: {}", e),
@@ -542,7 +539,8 @@ mod tests {
 
         let core = Headless::start(dir.path()).await.unwrap();
         let state = &core.server.state;
-        assert_eq!(*state.provider_id.read().await, "torbox");
+        assert_eq!(state.primary_provider_id().await, "torbox");
+        assert_eq!(state.provider_prefs().await[0], crate::state::ProviderPref { id: "torbox".into(), enabled: true });
         assert_eq!(state.get_provider().await.info().id, "torbox");
         assert_eq!(state.settings.read().await.download_folder.as_deref(), Some("/downloads"));
         assert!(state.engine().is_ok());

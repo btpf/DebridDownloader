@@ -358,9 +358,8 @@ export default function WatchListPage() {
               size="sm"
               onClick={async () => {
                 try {
-                  const { addMagnet, selectTorrentFiles } = await import("../api/torrents");
-                  const resp = await addMagnet(m.magnet);
-                  await selectTorrentFiles(resp.id, "all").catch(() => {});
+                  const { addMagnet } = await import("../api/torrents");
+                  await addMagnet(m.magnet);
                 } catch (e) {
                   console.error("Failed to add magnet:", e);
                 }

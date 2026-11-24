@@ -105,7 +105,33 @@ pub async fn test_tracker(
     }
 }
 
+/// Hashes cached on any enabled, signed-in provider. Errors only when every provider failed.
 pub async fn check_cache_availability(state: &AppState, hashes: &[String]) -> Result<Vec<String>, String> {
-    let provider = state.get_provider().await;
-    provider.check_availability(hashes).await.map_err(|e| format!("{}", e))
+    let active = state.active_providers().await;
+    if active.is_empty() {
+        return Ok(Vec::new());
+    }
+    let results = futures::future::join_all(active.iter().map(|(_, p)| p.check_availability(hashes))).await;
+    let mut cached: Vec<String> = Vec::new();
+    let mut first_err = None;
+    let mut any_ok = false;
+    for result in results {
+        match result {
+            Ok(found) => {
+                any_ok = true;
+                for h in found {
+                    if !cached.contains(&h) {
+                        cached.push(h);
+                    }
+                }
+            }
+            Err(e) => {
+                first_err.get_or_insert(e.to_string());
+            }
+        }
+    }
+    match first_err {
+        Some(e) if !any_ok => Err(e),
+        _ => Ok(cached),
+    }
 }

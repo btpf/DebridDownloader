@@ -327,6 +327,8 @@ fn map_torrent(t: RdTorrent) -> shared::Torrent {
         ended: t.ended,
         speed: t.speed,
         seeders: t.seeders,
+        provider: String::new(),
+        copies: Vec::new(),
     }
 }
 
@@ -353,6 +355,7 @@ fn map_torrent_info(info: RdTorrentInfo) -> shared::TorrentInfo {
         ended: info.ended,
         speed: info.speed,
         seeders: info.seeders,
+        provider: String::new(),
     }
 }
 
@@ -452,12 +455,12 @@ impl DebridProvider for RdClient {
 
     async fn add_magnet(&self, magnet: &str) -> Result<shared::AddTorrentResponse, shared::ProviderError> {
         let resp = self.rd_add_magnet(magnet).await?;
-        Ok(shared::AddTorrentResponse { id: resp.id })
+        Ok(shared::AddTorrentResponse { id: resp.id, provider: String::new() })
     }
 
     async fn add_torrent_file(&self, bytes: &[u8]) -> Result<shared::AddTorrentResponse, shared::ProviderError> {
         let resp = self.rd_add_torrent_file(bytes.to_vec()).await?;
-        Ok(shared::AddTorrentResponse { id: resp.id })
+        Ok(shared::AddTorrentResponse { id: resp.id, provider: String::new() })
     }
 
     async fn select_files(&self, id: &str, file_ids: &[u64]) -> Result<(), shared::ProviderError> {

@@ -7,7 +7,7 @@ pub struct RefreshedLink {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RefreshError {
-    #[error("Switch back to {0} to resume")]
+    #[error("Sign in to {0} to resume")]
     ProviderMismatch(String),
     #[error("this link can't be refreshed")]
     NotRefreshable,

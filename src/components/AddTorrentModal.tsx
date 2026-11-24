@@ -23,8 +23,8 @@ export default function AddTorrentModal({ onClose, onAdded, initialMagnet }: Pro
     setLoading(true);
     setError("");
     try {
-      const result = await torrentsApi.addMagnet(magnet.trim());
-      await torrentsApi.selectTorrentFiles(result.id, "all");
+      // The backend picks the provider(s) and selects every file.
+      await torrentsApi.addMagnet(magnet.trim());
       onAdded();
       onClose();
     } catch (e) {
@@ -44,8 +44,7 @@ export default function AddTorrentModal({ onClose, onAdded, initialMagnet }: Pro
     setError("");
     try {
       const bytes = await readFile(selected as string);
-      const result = await torrentsApi.addTorrentFile(Array.from(bytes));
-      await torrentsApi.selectTorrentFiles(result.id, "all");
+      await torrentsApi.addTorrentFile(Array.from(bytes));
       onAdded();
       onClose();
     } catch (e) {

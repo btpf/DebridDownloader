@@ -8,10 +8,15 @@ export async function listTorrents(
   return call("list_torrents", { page: page ?? null, limit: limit ?? null });
 }
 
-export async function getTorrentInfo(id: string): Promise<TorrentInfo> {
-  return call("get_torrent_info", { id });
+/** `provider`: the provider `id` belongs to (the primary provider when left out). */
+export async function getTorrentInfo(id: string, provider?: string): Promise<TorrentInfo> {
+  return call("get_torrent_info", { id, provider: provider ?? null });
 }
 
+/**
+ * Add to the first provider (priority order) that accepts it, or to every enabled provider when
+ * "add to all providers" is on. Every file is selected where it lands, so it starts right away.
+ */
 export async function addMagnet(magnet: string): Promise<AddTorrentResponse> {
   return call("add_magnet", { magnet });
 }
@@ -24,11 +29,12 @@ export async function addTorrentFile(
 
 export async function selectTorrentFiles(
   id: string,
-  fileIds: string
+  fileIds: string,
+  provider?: string
 ): Promise<void> {
-  return call("select_torrent_files", { id, fileIds });
+  return call("select_torrent_files", { id, fileIds, provider: provider ?? null });
 }
 
-export async function deleteTorrent(id: string): Promise<void> {
-  return call("delete_torrent", { id });
+export async function deleteTorrent(id: string, provider?: string): Promise<void> {
+  return call("delete_torrent", { id, provider: provider ?? null });
 }

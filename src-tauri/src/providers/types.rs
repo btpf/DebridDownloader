@@ -10,6 +10,17 @@ pub struct ProviderInfo {
     pub supports_streaming: bool,
 }
 
+/// A provider's entry in the account list: whether it's enabled and signed in, and as whom.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderAccount {
+    pub id: String,
+    pub name: String,
+    pub auth_method: AuthMethod,
+    pub enabled: bool,
+    pub authenticated: bool,
+    pub user: Option<User>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMethod {
@@ -99,6 +110,22 @@ pub struct Torrent {
     pub speed: Option<i64>,
     #[serde(default)]
     pub seeders: Option<i64>,
+    /// Id of the provider the torrent is on. Filled in by the service layer, not the clients.
+    #[serde(default)]
+    pub provider: String,
+    /// Every provider holding this torrent, in priority order (filled in by
+    /// `service::torrents::merge_torrents`; empty straight from a client).
+    #[serde(default)]
+    pub copies: Vec<TorrentCopy>,
+}
+
+/// The same torrent on one provider.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TorrentCopy {
+    pub provider: String,
+    pub id: String,
+    pub status: String,
+    pub progress: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,11 +155,17 @@ pub struct TorrentInfo {
     pub speed: Option<i64>,
     #[serde(default)]
     pub seeders: Option<i64>,
+    /// Id of the provider the torrent is on. Filled in by the service layer, not the clients.
+    #[serde(default)]
+    pub provider: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddTorrentResponse {
     pub id: String,
+    /// Id of the provider the torrent was added to. Filled in by the service layer.
+    #[serde(default)]
+    pub provider: String,
 }
 
 /// How to obtain a fresh URL for a file when its debrid link expires.

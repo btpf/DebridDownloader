@@ -3,9 +3,10 @@ import type { StreamUrlResponse } from "../types";
 
 export async function getStreamUrl(
   torrentId: string,
-  fileId: number
+  fileId: number,
+  provider?: string
 ): Promise<StreamUrlResponse> {
-  return call("get_stream_url", { torrentId, fileId });
+  return call("get_stream_url", { torrentId, fileId, provider: provider ?? null });
 }
 
 export async function cleanupStreamSession(

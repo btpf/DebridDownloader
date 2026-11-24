@@ -8,10 +8,10 @@ import * as torrentsApi from "../api/torrents";
 import * as downloadsApi from "../api/downloads";
 import { getSettings } from "../api/settings";
 import { getStreamUrl } from "../api/streaming";
-import { getActiveProvider } from "../api/providers";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { confirmAction } from "../lib/confirm";
 import type { Torrent, TorrentInfo, AppSettings } from "../types";
+import { providerName, torrentCopies, torrentKey } from "../lib/providers";
 import { Button, cn, ContextMenu, IconButton, Inspector, Menu, Spinner, StatusDot, Toolbar, type MenuItem } from "../components/ui";
 import {
   formatBytes,
@@ -58,11 +58,29 @@ const isInlineVideo = (path: string) => INLINE_VIDEO_EXTS.includes(getFileExt(pa
 const isExternalVideo = (path: string) => EXTERNAL_VIDEO_EXTS.includes(getFileExt(path));
 const isArchive = (path: string) => [".zip", ".rar"].includes(getFileExt(path));
 const baseName = (path: string) => path.split("/").pop() || path;
+/** `undefined` for an empty provider id, so the backend falls back to the primary provider. */
+const providerArg = (p: string | undefined) => p || undefined;
+
+/** Each provider holding the torrent: a dot in that copy's status color, then the provider's name. */
+function ProviderList({ torrent }: { torrent: Torrent }) {
+  const copies = torrentCopies(torrent);
+  const title = copies.map((c) => `${providerName(c.provider)}: ${torrentStatusLabel(c.status)}`).join("\n");
+  return (
+    <span className="flex min-w-0 items-center gap-2.5 overflow-hidden" title={title}>
+      {copies.map((c) => (
+        <StatusDot key={`${c.provider}:${c.id}`} status={torrentStatusDot(c.status)}>
+          <span className="truncate">{c.provider ? providerName(c.provider) : torrentStatusLabel(c.status)}</span>
+        </StatusDot>
+      ))}
+    </span>
+  );
+}
 
 export default function TorrentsPage() {
   const [torrents, setTorrents] = useState<Torrent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  /** `torrentKey` of the selected row. */
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -81,10 +99,12 @@ export default function TorrentsPage() {
   const [downloading, setDownloading] = useState(false);
   const [zipTarget, setZipTarget] = useState<{ torrentId: string; fileId: number | null; name: string; torrentName: string } | null>(null);
   const [notice, setNotice] = useState("");
+  const selected = useMemo(() => torrents.find((t) => torrentKey(t) === selectedId) ?? null, [torrents, selectedId]);
+  // The copy the inspector shows and acts on (see `merge_torrents`).
+  const selectedTorrentId = selected?.id ?? null;
+  const selectedProvider = selected?.provider ?? "";
   // "Download Contents" is only enabled for Real-Debrid, the one provider it's been tested with.
-  const [providerId, setProviderId] = useState<string | null>(null);
-  useEffect(() => { getActiveProvider().then(setProviderId).catch(() => {}); }, []);
-  const archiveContents = providerId === "real-debrid";
+  const archiveContents = detailInfo?.provider === "real-debrid";
 
   const { openPreview, loadingTorrentId: miniPlayerLoadingId } = useMiniPlayer();
 
@@ -94,7 +114,7 @@ export default function TorrentsPage() {
   const handlePlayExternal = async (fileId: number) => {
     if (!detailInfo) return;
     try {
-      const result = await getStreamUrl(detailInfo.id, fileId);
+      const result = await getStreamUrl(detailInfo.id, fileId, providerArg(detailInfo.provider));
       await openUrl(result.stream_url);
       // Don't immediately clean up — external player needs the session alive for streaming
     } catch (e) {
@@ -118,14 +138,14 @@ export default function TorrentsPage() {
   useEffect(() => { fetchTorrents(); }, [fetchTorrents]);
   useEffect(() => { getSettings().then(setSettings).catch(() => {}); }, []);
 
-  // Fetch detail when selectedId changes
+  // Fetch detail when the selected copy changes
   useEffect(() => {
-    if (!selectedId) { setDetailInfo(null); return; }
+    if (!selectedTorrentId) { setDetailInfo(null); return; }
     const fetchInfo = async () => {
       setDetailLoading(true);
       setDetailError("");
       try {
-        const data = await torrentsApi.getTorrentInfo(selectedId);
+        const data = await torrentsApi.getTorrentInfo(selectedTorrentId, providerArg(selectedProvider));
         setDetailInfo(data);
         setSelectedFiles(new Set(data.files.filter((f) => f.selected).map((f) => f.id)));
       } catch (e) {
@@ -135,7 +155,7 @@ export default function TorrentsPage() {
       }
     };
     fetchInfo();
-  }, [selectedId]);
+  }, [selectedTorrentId, selectedProvider]);
 
   // Window event listeners
   useEffect(() => {
@@ -171,44 +191,56 @@ export default function TorrentsPage() {
   }, []);
 
   useEffect(() => {
-    const handler = () => { if (selectedId) confirmDelete(selectedId); };
+    const handler = () => { if (selected) confirmDelete(selected); };
     window.addEventListener("delete-selected", handler);
     return () => window.removeEventListener("delete-selected", handler);
-  }, [selectedId]);
+  }, [selected]);
 
   useEffect(() => {
-    const handler = () => { if (selectedId) handleDownloadTorrent(selectedId); };
+    const handler = () => { if (selected) handleDownloadTorrent(selected); };
     window.addEventListener("action-selected", handler);
     return () => window.removeEventListener("action-selected", handler);
-  }, [selectedId, settings]);
+  }, [selected, settings]);
 
-  const handleDelete = async (id: string) => {
+  /** Delete every provider's copy of the torrent. */
+  const deleteCopies = async (t: Torrent) => {
+    for (const c of torrentCopies(t)) await torrentsApi.deleteTorrent(c.id, providerArg(c.provider));
+  };
+
+  const handleDelete = async (t: Torrent) => {
+    const key = torrentKey(t);
     try {
-      await torrentsApi.deleteTorrent(id);
-      setTorrents((prev) => prev.filter((t) => t.id !== id));
-      if (selectedId === id) setSelectedId(null);
-    } catch (e) { setError(String(e)); }
+      await deleteCopies(t);
+      setTorrents((prev) => prev.filter((x) => torrentKey(x) !== key));
+      if (selectedId === key) setSelectedId(null);
+    } catch (e) { setError(String(e)); fetchTorrents(); }
+  };
+
+  /** "Delete this torrent?", naming the providers when it's on more than one. */
+  const deletePrompt = (t: Torrent) => {
+    const copies = torrentCopies(t);
+    return copies.length > 1
+      ? `Delete this torrent from ${copies.map((c) => providerName(c.provider)).join(", ")}?`
+      : "Delete this torrent?";
   };
 
   /** Delete only after the user answers Yes; the dialog is async in Tauri (#47). */
-  const confirmDelete = async (id: string) => {
-    if (await confirmAction("Delete this torrent?")) await handleDelete(id);
+  const confirmDelete = async (t: Torrent) => {
+    if (await confirmAction(deletePrompt(t))) await handleDelete(t);
   };
 
   const handleDeleteAll = async () => {
     if (!(await confirmAction(`Delete all ${torrents.length} torrents?`))) return;
     try {
       for (const t of torrents) {
-        await torrentsApi.deleteTorrent(t.id).catch(() => {});
+        await deleteCopies(t).catch(() => {});
       }
       setTorrents([]);
       setSelectedId(null);
     } catch (e) { setError(String(e)); }
   };
 
-  const handleDownloadTorrent = async (id: string) => {
-    const torrent = torrents.find((t) => t.id === id);
-    if (!torrent) return;
+  const handleDownloadTorrent = async (torrent: Torrent) => {
     try {
       // Symlink mode: backend uses library path from settings, no folder picker needed
       let folder = settings?.download_folder ?? null;
@@ -223,7 +255,7 @@ export default function TorrentsPage() {
         if (!picked) return;
         folder = picked as string;
       }
-      const links = await downloadsApi.unrestrictTorrentLinks(id);
+      const links = await downloadsApi.unrestrictTorrentLinks(torrent.id, undefined, providerArg(torrent.provider));
       if (links.length > 0) await downloadsApi.startDownloads(links, folder, torrent.filename);
     } catch (e) { setError(String(e)); }
   };
@@ -233,7 +265,7 @@ export default function TorrentsPage() {
     setSaving(true);
     try {
       const ids = Array.from(selectedFiles).join(",");
-      await torrentsApi.selectTorrentFiles(detailInfo.id, ids || "all");
+      await torrentsApi.selectTorrentFiles(detailInfo.id, ids || "all", providerArg(detailInfo.provider));
       fetchTorrents();
     } catch (e) { setDetailError(String(e)); }
     finally { setSaving(false); }
@@ -278,7 +310,7 @@ export default function TorrentsPage() {
       }
       // All ticked fetches every link in one go, which also works when RD packed the files into one archive.
       const fileIds = allPicked ? undefined : picked.map((f) => f.id);
-      const links = await downloadsApi.unrestrictTorrentLinks(detailInfo.id, fileIds);
+      const links = await downloadsApi.unrestrictTorrentLinks(detailInfo.id, fileIds, providerArg(detailInfo.provider));
       if (links.length === 0) {
         setDetailError("No download links are available for this torrent yet.");
         return;
@@ -290,9 +322,9 @@ export default function TorrentsPage() {
   };
 
   const handleDetailDelete = async () => {
-    if (!detailInfo || !(await confirmAction("Delete this torrent?"))) return;
+    if (!detailInfo || !selected || !(await confirmAction(deletePrompt(selected)))) return;
     try {
-      await torrentsApi.deleteTorrent(detailInfo.id);
+      await deleteCopies(selected);
       setSelectedId(null);
       fetchTorrents();
     } catch (e) { setDetailError(String(e)); }
@@ -323,10 +355,11 @@ export default function TorrentsPage() {
   const closeInspector = () => { setStreamError(null); setSelectedId(null); };
 
   // Right-click menu: same actions and handlers as the old positioned menu.
+  const preview = (t: Torrent) => openPreview(t.id, undefined, undefined, providerArg(t.provider));
   const rowMenuItems = (t: Torrent): MenuItem[] => [
-    { label: "Preview", onSelect: () => openPreview(t.id) },
-    { label: "Download", onSelect: () => handleDownloadTorrent(t.id) },
-    { label: "Delete", danger: true, onSelect: () => { confirmDelete(t.id); } },
+    { label: "Preview", onSelect: () => preview(t) },
+    { label: "Download", onSelect: () => handleDownloadTorrent(t) },
+    { label: "Delete", danger: true, onSelect: () => { confirmDelete(t); } },
     ...(torrents.length > 1
       ? (["separator", { label: `Delete All (${torrents.length})`, danger: true, onSelect: () => handleDeleteAll() }] as MenuItem[])
       : []),
@@ -356,10 +389,11 @@ export default function TorrentsPage() {
       render: (t) => <span className="text-sm text-fg-muted tabular">{formatRelativeTime(t.added)}</span>,
     },
     {
-      key: "status",
-      header: "Status",
-      width: 28,
-      render: (t) => <StatusDot status={torrentStatusDot(t.status)}>{torrentStatusLabel(t.status)}</StatusDot>,
+      // Which providers hold the torrent; each dot is that copy's status (full status on hover).
+      key: "provider",
+      header: "Provider",
+      width: 44,
+      render: (t) => <ProviderList torrent={t} />,
     },
     {
       key: "actions",
@@ -369,7 +403,7 @@ export default function TorrentsPage() {
         <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           {miniPlayerLoadingId === t.id && <Spinner size="sm" />}
           {t.status === "downloaded" && (
-            <IconButton label="Download" onClick={() => handleDownloadTorrent(t.id)}>
+            <IconButton label="Download" onClick={() => handleDownloadTorrent(t)}>
               <DownloadIcon />
             </IconButton>
           )}
@@ -380,10 +414,10 @@ export default function TorrentsPage() {
               </IconButton>
             }
             items={[
-              { label: "Preview Video", onSelect: () => openPreview(t.id), disabled: miniPlayerLoadingId === t.id },
+              { label: "Preview Video", onSelect: () => preview(t), disabled: miniPlayerLoadingId === t.id },
               { label: "Copy Magnet", onSelect: () => { navigator.clipboard.writeText("magnet:?xt=urn:btih:" + t.hash).catch(() => {}); } },
               "separator",
-              { label: "Delete", danger: true, onSelect: () => { confirmDelete(t.id); } },
+              { label: "Delete", danger: true, onSelect: () => { confirmDelete(t); } },
             ]}
           />
         </div>
@@ -437,9 +471,9 @@ export default function TorrentsPage() {
           <DataTable
             columns={columns}
             data={filtered}
-            rowKey={(t) => t.id}
-            onRowClick={(t) => selectRow(t.id)}
-            onKeyboardSelect={(t) => selectRow(t.id)}
+            rowKey={torrentKey}
+            onRowClick={(t) => selectRow(torrentKey(t))}
+            onKeyboardSelect={(t) => selectRow(torrentKey(t))}
             rowWrapper={(t, row) => <ContextMenu items={rowMenuItems(t)}>{row}</ContextMenu>}
             selectedId={selectedId}
             sortKey={sortKey}
@@ -455,7 +489,7 @@ export default function TorrentsPage() {
           id="torrents"
           open={inspectorVisible}
           onClose={closeInspector}
-          title={detailInfo?.filename ?? torrents.find((t) => t.id === selectedId)?.filename ?? "Torrent"}
+          title={detailInfo?.filename ?? selected?.filename ?? "Torrent"}
           subtitle={detailInfo ? `${formatBytes(detailInfo.bytes)} · ${torrentStatusLabel(detailInfo.status)}` : undefined}
           footer={
             detailInfo ? (
@@ -487,7 +521,7 @@ export default function TorrentsPage() {
                   </Button>
                 )}
                 {canDownload && (
-                  <Button onClick={() => openPreview(detailInfo.id)} disabled={miniPlayerLoadingId === detailInfo.id}>
+                  <Button onClick={() => openPreview(detailInfo.id, undefined, undefined, providerArg(detailInfo.provider))} disabled={miniPlayerLoadingId === detailInfo.id}>
                     Preview
                   </Button>
                 )}
@@ -507,6 +541,21 @@ export default function TorrentsPage() {
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
                 <dt className="text-fg-muted">Status</dt>
                 <dd><StatusDot status={torrentStatusDot(detailInfo.status)}><span className="text-sm">{torrentStatusLabel(detailInfo.status)}</span></StatusDot></dd>
+                {selected && (
+                  <>
+                    <dt className="text-fg-muted">{torrentCopies(selected).length > 1 ? "Providers" : "Provider"}</dt>
+                    <dd className="flex flex-col gap-0.5">
+                      {torrentCopies(selected).map((c) => (
+                        <StatusDot key={`${c.provider}:${c.id}`} status={torrentStatusDot(c.status)}>
+                          <span className="text-sm">
+                            {providerName(c.provider)}
+                            <span className="text-fg-muted"> · {torrentStatusLabel(c.status)}</span>
+                          </span>
+                        </StatusDot>
+                      ))}
+                    </dd>
+                  </>
+                )}
                 <dt className="text-fg-muted">Size</dt>
                 <dd className="text-fg tabular">{formatBytes(detailInfo.bytes)}</dd>
                 <dt className="text-fg-muted">Added</dt>
@@ -565,7 +614,7 @@ export default function TorrentsPage() {
                               size="sm"
                               label="Play in preview"
                               className="-my-1"
-                              onClick={() => openPreview(detailInfo.id, file.id, name || file.path)}
+                              onClick={() => openPreview(detailInfo.id, file.id, name || file.path, providerArg(detailInfo.provider))}
                               disabled={miniPlayerLoadingId === detailInfo.id}
                             >
                               {miniPlayerLoadingId === detailInfo.id ? <Spinner size="sm" /> : <span className="text-xs">▶</span>}
@@ -612,6 +661,7 @@ export default function TorrentsPage() {
       {zipTarget && (
         <ZipContentsDialog
           torrentId={zipTarget.torrentId}
+          provider={providerArg(detailInfo?.provider)}
           fileId={zipTarget.fileId}
           fileName={zipTarget.name}
           torrentName={zipTarget.torrentName}

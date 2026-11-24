@@ -180,13 +180,10 @@ pub fn run() {
                 let store: tauri::State<'_, persistence::Persistence> = app.state();
                 if let Some(val) = store.get(commands::settings::SETTINGS_KEY)? {
                     match serde_json::from_value::<state::AppSettings>(val) {
-                        Ok(loaded) => {
-                            *state.settings.blocking_write() = loaded.clone();
-                            *state.provider_id.blocking_write() = loaded.provider.clone();
-                            match commands::auth::create_provider(&loaded.provider) {
-                                Ok(p) => *state.provider.blocking_write() = p,
-                                Err(e) => log::warn!("Persisted provider '{}' invalid, keeping default: {}", loaded.provider, e),
-                            }
+                        Ok(mut loaded) => {
+                            // Older blobs have one `provider`; this turns it into the priority list.
+                            loaded.normalize_providers();
+                            *state.settings.blocking_write() = loaded;
                         }
                         Err(e) => log::warn!("Failed to deserialize persisted AppSettings, using defaults: {}", e),
                     }
@@ -266,6 +263,7 @@ pub fn run() {
             commands::auth::logout,
             commands::auth::is_authenticated,
             commands::auth::get_user,
+            commands::auth::get_provider_accounts,
             commands::auth::oauth_start,
             commands::auth::oauth_poll_credentials,
             commands::auth::oauth_get_token,

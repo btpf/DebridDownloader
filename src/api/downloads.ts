@@ -8,9 +8,10 @@ import type {
 /** Links for every file in the torrent, or only `fileIds` (ids from `TorrentInfo.files`). */
 export async function unrestrictTorrentLinks(
   torrentId: string,
-  fileIds?: number[]
+  fileIds?: number[],
+  provider?: string
 ): Promise<DownloadLink[]> {
-  return call("unrestrict_torrent_links", { torrentId, fileIds: fileIds ?? null });
+  return call("unrestrict_torrent_links", { torrentId, fileIds: fileIds ?? null, provider: provider ?? null });
 }
 
 export async function startDownloads(

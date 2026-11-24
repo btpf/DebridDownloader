@@ -21,6 +21,7 @@ const OVERSCAN = 10;
  */
 export default function ZipContentsDialog({
   torrentId,
+  provider,
   fileId,
   fileName,
   torrentName,
@@ -28,6 +29,8 @@ export default function ZipContentsDialog({
   onStarted,
 }: {
   torrentId: string;
+  /** Provider the torrent is on (the primary provider when left out). */
+  provider?: string;
   /** null: the torrent's single packed download (Real-Debrid RAR). */
   fileId: number | null;
   fileName: string;
@@ -55,7 +58,7 @@ export default function ZipContentsDialog({
   useEffect(() => {
     let alive = true;
     archiveApi
-      .inspectTorrentArchive(torrentId, fileId)
+      .inspectTorrentArchive(torrentId, fileId, provider)
       .then((data) => {
         if (!alive) return;
         setInfo(data);
@@ -65,7 +68,7 @@ export default function ZipContentsDialog({
     return () => {
       alive = false;
     };
-  }, [torrentId, fileId]);
+  }, [torrentId, fileId, provider]);
 
   const files = useMemo(() => (info?.entries ?? []).filter((e) => !e.is_dir), [info]);
   const usable = useMemo(() => files.filter((e) => !e.unsupported), [files]);

@@ -14,8 +14,8 @@ pub async fn list_torrents(
 }
 
 #[tauri::command]
-pub async fn get_torrent_info(state: State<'_, AppState>, id: String) -> Result<TorrentInfo, String> {
-    svc::get_torrent_info(&state, &id).await
+pub async fn get_torrent_info(state: State<'_, AppState>, id: String, provider: Option<String>) -> Result<TorrentInfo, String> {
+    svc::get_torrent_info(&state, &id, provider.as_deref()).await
 }
 
 #[tauri::command]
@@ -29,11 +29,16 @@ pub async fn add_torrent_file(state: State<'_, AppState>, file_bytes: Vec<u8>) -
 }
 
 #[tauri::command]
-pub async fn select_torrent_files(state: State<'_, AppState>, id: String, file_ids: String) -> Result<(), String> {
-    svc::select_torrent_files(&state, &id, &file_ids).await
+pub async fn select_torrent_files(
+    state: State<'_, AppState>,
+    id: String,
+    file_ids: String,
+    provider: Option<String>,
+) -> Result<(), String> {
+    svc::select_torrent_files(&state, &id, &file_ids, provider.as_deref()).await
 }
 
 #[tauri::command]
-pub async fn delete_torrent(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    svc::delete_torrent(&state, &id).await
+pub async fn delete_torrent(state: State<'_, AppState>, id: String, provider: Option<String>) -> Result<(), String> {
+    svc::delete_torrent(&state, &id, provider.as_deref()).await
 }

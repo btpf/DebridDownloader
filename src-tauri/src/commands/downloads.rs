@@ -13,8 +13,9 @@ pub async fn unrestrict_torrent_links(
     state: State<'_, AppState>,
     torrent_id: String,
     file_ids: Option<Vec<u64>>,
+    provider: Option<String>,
 ) -> Result<Vec<DownloadLink>, String> {
-    svc::unrestrict_torrent_links(&state, &torrent_id, file_ids).await
+    svc::unrestrict_torrent_links(&state, &torrent_id, file_ids, provider.as_deref()).await
 }
 
 /// Queue files for download

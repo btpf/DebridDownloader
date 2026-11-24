@@ -6,13 +6,15 @@ use crate::state::{AppSettings, AppState};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Get download links for a torrent: every file, or only `file_ids` when given.
+/// Get download links for a torrent on `provider` (the primary one when `None`): every file, or
+/// only `file_ids` when given.
 pub async fn unrestrict_torrent_links(
     state: &AppState,
     torrent_id: &str,
     file_ids: Option<Vec<u64>>,
+    provider: Option<&str>,
 ) -> Result<Vec<DownloadLink>, String> {
-    let provider = state.get_provider().await;
+    let provider = state.provider_for(provider).await?.1;
     match file_ids {
         Some(ids) => provider.get_download_links_for_files(torrent_id, &ids).await,
         None => provider.get_download_links(torrent_id).await,

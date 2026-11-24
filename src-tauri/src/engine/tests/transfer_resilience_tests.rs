@@ -94,7 +94,7 @@ async fn provider_mismatch_message() {
     let refresher = FakeRefresher::new(|| Err(RefreshError::ProviderMismatch("Real-Debrid".into())));
     let dir = tempfile::tempdir().unwrap();
     let (r, _) = run(http_job(&dir, "a.bin", expired, 1000), deps(refresher)).await;
-    assert_eq!(r, Err(TransferError::Fatal("Switch back to Real-Debrid to resume".into())));
+    assert_eq!(r, Err(TransferError::Fatal("Sign in to Real-Debrid to resume".into())));
 }
 
 #[tokio::test]

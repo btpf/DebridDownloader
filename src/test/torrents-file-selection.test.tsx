@@ -61,7 +61,7 @@ describe("Torrent file selection", () => {
     await renderAndSelect();
     expect(screen.getByText("3 of 3 selected, 2.9 KB")).toBeInTheDocument();
     await act(async () => { fireEvent.click(inspector().getByRole("button", { name: "Download" })); });
-    expect(unrestrictTorrentLinks).toHaveBeenCalledWith("T1", undefined);
+    expect(unrestrictTorrentLinks).toHaveBeenCalledWith("T1", undefined, undefined);
     expect(startDownloads).toHaveBeenCalledWith([LINK], "/dl", "ParaNorman 2012");
   });
 
@@ -71,7 +71,7 @@ describe("Torrent file selection", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Select ParaNorman/Extras/sample.mkv" }));
     expect(screen.getByText("1 of 3 selected, 2.0 KB")).toBeInTheDocument();
     await act(async () => { fireEvent.click(inspector().getByRole("button", { name: "Download 1 file" })); });
-    expect(unrestrictTorrentLinks).toHaveBeenCalledWith("T1", [2]);
+    expect(unrestrictTorrentLinks).toHaveBeenCalledWith("T1", [2], undefined);
     expect(startDownloads).toHaveBeenCalledWith([LINK], "/dl", "ParaNorman 2012");
   });
 

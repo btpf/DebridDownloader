@@ -17,13 +17,16 @@ interface MiniPlayerState {
   filename: string;
   loadingTorrentId: string | null;
   torrentId: string | null;
+  /** Provider the previewed torrent is on (null: the primary provider). */
+  provider: string | null;
   fileId: number | null;
   isInlinePlayable: boolean;
   toastMessage: string | null;
 }
 
 interface MiniPlayerActions {
-  openPreview: (torrentId: string, fileId?: number, filename?: string) => Promise<void>;
+  /** `provider`: the provider `torrentId` belongs to (the primary provider when left out). */
+  openPreview: (torrentId: string, fileId?: number, filename?: string, provider?: string) => Promise<void>;
   closePreview: () => Promise<void>;
   retryPreview: () => Promise<void>;
   dismissToast: () => void;
@@ -40,6 +43,7 @@ const initialState: MiniPlayerState = {
   filename: "",
   loadingTorrentId: null,
   torrentId: null,
+  provider: null,
   fileId: null,
   isInlinePlayable: true,
   toastMessage: null,
@@ -53,11 +57,13 @@ export function MiniPlayerProvider({ children }: { children: ReactNode }) {
   const loadingRef = useRef(false);
   const torrentIdRef = useRef<string | null>(null);
   const fileIdRef = useRef<number | null>(null);
+  const providerRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
   sessionIdRef.current = state.sessionId;
   torrentIdRef.current = state.torrentId;
   fileIdRef.current = state.fileId;
+  providerRef.current = state.provider;
   loadingRef.current = state.loadingTorrentId !== null;
 
   const cleanupSession = useCallback(async (sid: string | null) => {
@@ -75,7 +81,7 @@ export function MiniPlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openPreview = useCallback(
-    async (torrentId: string, fileId?: number, filename?: string) => {
+    async (torrentId: string, fileId?: number, filename?: string, provider?: string) => {
       // Prevent duplicate requests using ref for immediate check
       if (loadingRef.current) return;
       loadingRef.current = true;
@@ -91,7 +97,7 @@ export function MiniPlayerProvider({ children }: { children: ReactNode }) {
 
         // If no fileId provided, fetch torrent info and pick the largest video file
         if (targetFileId === undefined) {
-          const info = await getTorrentInfo(torrentId);
+          const info = await getTorrentInfo(torrentId, provider);
           const videoFiles = info.files.filter((f) =>
             ALL_VIDEO_EXTS.includes(getFileExt(f.path))
           );
@@ -111,7 +117,7 @@ export function MiniPlayerProvider({ children }: { children: ReactNode }) {
         }
 
         // Get stream URL — targetFileId is guaranteed to be a number here
-        const result = await getStreamUrl(torrentId, targetFileId!);
+        const result = await getStreamUrl(torrentId, targetFileId!, provider);
 
         setState({
           isOpen: true,
@@ -120,6 +126,7 @@ export function MiniPlayerProvider({ children }: { children: ReactNode }) {
           filename: targetFilename || "Video",
           loadingTorrentId: null,
           torrentId,
+          provider: provider ?? null,
           fileId: targetFileId!,
           isInlinePlayable: inlinePlayable,
           toastMessage: null,
@@ -146,7 +153,7 @@ export function MiniPlayerProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, loadingTorrentId: tid, streamUrl: null }));
 
     try {
-      const result = await getStreamUrl(tid, fid);
+      const result = await getStreamUrl(tid, fid, providerRef.current ?? undefined);
       setState((s) => ({
         ...s,
         streamUrl: result.stream_url,

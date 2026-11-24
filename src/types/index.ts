@@ -36,7 +36,31 @@ export interface ProviderInfo {
   supports_streaming: boolean;
 }
 
+/** Mirrors `ProviderAccount` (providers/types.rs): one entry of the priority-ordered account list. */
+export interface ProviderAccount {
+  id: string;
+  name: string;
+  auth_method: "api_key" | "oauth_device";
+  enabled: boolean;
+  authenticated: boolean;
+  user: User | null;
+}
+
+/** Mirrors `ProviderPref` (state.rs): a provider's place in the priority list. */
+export interface ProviderPref {
+  id: string;
+  enabled: boolean;
+}
+
 // ── Torrents ──
+
+/** The same torrent on one provider (`TorrentCopy` in providers/types.rs). */
+export interface TorrentCopy {
+  provider: string;
+  id: string;
+  status: string;
+  progress: number;
+}
 
 export interface Torrent {
   id: string;
@@ -50,6 +74,10 @@ export interface Torrent {
   ended?: string;
   speed?: number;
   seeders?: number;
+  /** Provider of the copy this row acts on (`id` is that provider's torrent id). */
+  provider: string;
+  /** Every provider holding this torrent, in priority order (one row per torrent across providers). */
+  copies: TorrentCopy[];
 }
 
 export interface TorrentFile {
@@ -72,10 +100,13 @@ export interface TorrentInfo {
   ended?: string;
   speed?: number;
   seeders?: number;
+  provider: string;
 }
 
 export interface AddTorrentResponse {
   id: string;
+  /** Provider the torrent was added to (the highest-priority one when added to several). */
+  provider: string;
 }
 
 // ── Downloads ──
@@ -219,6 +250,10 @@ export interface AppSettings {
   /** Ignored: TorBox retired its Search API (#92). Kept so older settings blobs still load. */
   torbox_search_enabled?: boolean;
   segments_per_file?: number;
+  /** Every provider in priority order, enabled or not. */
+  providers?: ProviderPref[];
+  /** Add torrents to every enabled, signed-in provider instead of only the first that accepts them. */
+  add_to_all_providers?: boolean;
 }
 
 // ── Search ──

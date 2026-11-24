@@ -6,11 +6,12 @@ import {
   Routes,
   useNavigate,
 } from "react-router-dom";
-import { AuthContext, type AuthState } from "./hooks/useAuth";
+import { AuthContext, primaryUser, type AuthState } from "./hooks/useAuth";
 import { useMagnetLinkListener } from "./hooks/useMagnetLinkListener";
 import * as authApi from "./api/auth";
 import * as torrentsApi from "./api/torrents";
-import type { User } from "./types";
+import { getProviderAccounts } from "./api/providers";
+import type { ProviderAccount } from "./types";
 
 import { MiniPlayerProvider, useMiniPlayer } from "./contexts/MiniPlayerContext";
 import MiniPlayer from "./components/MiniPlayer";
@@ -54,8 +55,9 @@ function MiniPlayerLogoutCleanup() {
 }
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
+  const [accounts, setAccounts] = useState<ProviderAccount[]>([]);
+  const isAuthenticated = accounts.some((a) => a.authenticated);
+  const user = primaryUser(accounts);
   const [loading, setLoading] = useState(true);
   const [magnetError, setMagnetError] = useState<string | null>(null);
 
@@ -63,14 +65,9 @@ function App() {
 
   const handleMagnetLink = useCallback(
     (event: { uri: string; displayName: string | null }) => {
-      torrentsApi.addMagnet(event.uri).then(async (response) => {
+      // The backend selects every file where the torrent lands, so it starts right away.
+      torrentsApi.addMagnet(event.uri).then(() => {
         clearCurrentUriRef.current();
-        // Auto-select all files so the torrent starts processing immediately
-        try {
-          await torrentsApi.selectTorrentFiles(response.id, "all");
-        } catch (e) {
-          console.error("Failed to auto-select files:", e);
-        }
         navigateRef.current?.("/torrents");
       }).catch((e) => {
         console.error("Failed to add magnet:", e);
@@ -88,22 +85,17 @@ function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const u = await authApi.getUser();
-      setUser(u);
-      setIsAuthenticated(true);
+      setAccounts(await getProviderAccounts());
     } catch {
-      setIsAuthenticated(false);
-      setUser(null);
+      setAccounts([]);
     }
   }, []);
 
   useEffect(() => {
     const init = async () => {
       try {
-        const hasToken = await authApi.loadSavedToken();
-        if (hasToken) {
-          await refresh();
-        }
+        await authApi.loadSavedToken();
+        await refresh();
       } catch {
         // no saved token
       } finally {
@@ -113,8 +105,8 @@ function App() {
     init();
   }, [refresh]);
 
-  const login = async (token: string) => {
-    await authApi.setApiToken(token);
+  const login = async (token: string, providerId?: string) => {
+    await authApi.setApiToken(token, providerId);
     await refresh();
   };
 
@@ -150,15 +142,15 @@ function App() {
     await refresh();
   };
 
-  const logout = async () => {
-    await authApi.logout();
-    setIsAuthenticated(false);
-    setUser(null);
+  const logout = async (providerId?: string) => {
+    await authApi.logout(providerId);
+    await refresh();
   };
 
   const authState: AuthState = {
     isAuthenticated,
     user,
+    accounts,
     loading,
     login,
     loginOAuth,

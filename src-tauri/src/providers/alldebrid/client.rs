@@ -165,7 +165,7 @@ impl AllDebridClient {
             return Err(api_error(Some(err), &format!("AllDebrid couldn't add this {}", what)));
         }
         item.id
-            .map(|id| shared::AddTorrentResponse { id })
+            .map(|id| shared::AddTorrentResponse { id, provider: String::new() })
             .ok_or_else(|| shared::ProviderError::Other("AllDebrid returned no magnet id".to_string()))
     }
 }
@@ -243,6 +243,8 @@ fn map_torrent(m: &AdMagnet) -> shared::Torrent {
         ended: timestamp(m.completion_date),
         speed: m.download_speed,
         seeders: m.seeders,
+        provider: String::new(),
+        copies: Vec::new(),
     }
 }
 
@@ -327,6 +329,7 @@ impl DebridProvider for AllDebridClient {
             ended: t.ended,
             speed: t.speed,
             seeders: t.seeders,
+            provider: String::new(),
         })
     }
 
