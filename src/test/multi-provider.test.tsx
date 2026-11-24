@@ -107,6 +107,17 @@ describe("Torrents list across providers", () => {
     expect(screen.getAllByText("AllDebrid").length).toBeGreaterThan(0);
   });
 
+  it("keeps the rows on screen while the list refreshes after an add (no flicker)", async () => {
+    render(<TooltipProvider><TorrentsPage /></TooltipProvider>);
+    await screen.findByText("Movie.mp4", { selector: "div" });
+    let finish: (v: unknown) => void = () => {};
+    torrentsApi.listTorrents.mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    act(() => { window.dispatchEvent(new Event("refresh-list")); });
+    expect(screen.getByText("Movie.mp4", { selector: "div" })).toBeInTheDocument();
+    await act(async () => { finish([torrentsApi.merged]); });
+    expect(screen.getByText("Movie.mp4", { selector: "div" })).toBeInTheDocument();
+  });
+
   it("opens the ready copy and deletes every copy from its own provider", async () => {
     window.confirm = vi.fn(() => true);
     render(<TooltipProvider><TorrentsPage /></TooltipProvider>);

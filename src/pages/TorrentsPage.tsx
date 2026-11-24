@@ -131,9 +131,11 @@ export default function TorrentsPage() {
     }
   };
 
+  // Refreshes (after an add, a delete, a drop...) keep the current rows on screen until the new
+  // list arrives; only the first load shows the spinner. Swapping the table for a spinner on every
+  // refresh made the list flicker.
   const fetchTorrents = useCallback(async () => {
     try {
-      setLoading(true);
       const data = await torrentsApi.listTorrents(1, 500);
       setTorrents(data);
       setError("");
