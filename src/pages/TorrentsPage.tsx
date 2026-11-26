@@ -166,7 +166,7 @@ export default function TorrentsPage() {
     setRefreshing(true);
     try {
       const providers = activeProvidersRef.current;
-      const data = await torrentsApi.listTorrents(1, 500);
+      const data = await torrentsApi.listTorrents();
       // Cached even if the tab was left meanwhile, so the next visit gets it.
       setCachedTorrents(data, providers);
       setTorrents(data);
@@ -778,7 +778,7 @@ export default function TorrentsPage() {
       {showAdd && (
         <AddTorrentModal
           onClose={() => setShowAdd(false)}
-          onAdded={fetchTorrents}
+          onAdded={(notice) => { fetchTorrents(); setNotice(notice); }}
         />
       )}
     </>

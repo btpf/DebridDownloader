@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { searchTorrents, checkCacheAvailability, getTrackerConfigs } from "../api/search";
 import { listTorrents, addMagnet } from "../api/torrents";
-import { torrentKey } from "../lib/providers";
+import { rejectedNotice, torrentKey } from "../lib/providers";
 import type { SearchResult, Torrent, TrackerStatus } from "../types";
 import { Button, cn, EmptyState, Input, Kbd, Spinner, StatusDot } from "../components/ui";
 import { torrentStatusDot, torrentStatusLabel } from "../utils";
@@ -70,7 +70,7 @@ export default function SearchPage() {
 
   // Fetch local torrents on mount
   useEffect(() => {
-    listTorrents(1, 500)
+    listTorrents()
       .then(setLocalTorrents)
       .catch(() => {});
   }, []);
@@ -157,8 +157,9 @@ export default function SearchPage() {
     if (value.startsWith("magnet:?")) {
       setQuery("");
       try {
-        await addMagnet(value);
+        const res = await addMagnet(value);
         setAddedHashes((prev) => new Set(prev).add("pasted"));
+        setError(rejectedNotice(res));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -179,7 +180,8 @@ export default function SearchPage() {
   const handleAddTorrent = useCallback(async (result: SearchResult) => {
     setAddingHash(result.info_hash);
     try {
-      await addMagnet(result.magnet);
+      const res = await addMagnet(result.magnet);
+      setError(rejectedNotice(res));
       setAddedHashes((prev) => {
         const next = new Set(prev);
         next.add(result.info_hash);

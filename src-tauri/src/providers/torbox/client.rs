@@ -97,7 +97,7 @@ impl TorBoxClient {
     fn created_id(data: TbCreateTorrent) -> Result<shared::AddTorrentResponse, shared::ProviderError> {
         data.torrent_id
             .or(data.queued_id)
-            .map(|id| shared::AddTorrentResponse { id: id.to_string(), provider: String::new() })
+            .map(|id| shared::AddTorrentResponse { id: id.to_string(), provider: String::new(), ..Default::default() })
             .ok_or_else(|| shared::ProviderError::Other("TorBox returned no torrent id".to_string()))
     }
 
@@ -221,10 +221,14 @@ impl DebridProvider for TorBoxClient {
 
     async fn list_torrents(
         &self,
-        _page: u32,
-        _limit: u32,
+        page: u32,
+        limit: u32,
     ) -> Result<Vec<shared::Torrent>, shared::ProviderError> {
-        let resp: TbApiResponse<Vec<TbTorrent>> = self.get("/torrents/mylist?bypass_cache=true").await?;
+        // Newest first. Without offset/limit TorBox sends only the newest 1000.
+        let offset = page.saturating_sub(1).saturating_mul(limit);
+        let resp: TbApiResponse<Vec<TbTorrent>> = self
+            .get(&format!("/torrents/mylist?bypass_cache=true&offset={}&limit={}", offset, limit))
+            .await?;
         let torrents = self.unwrap_response(resp)?;
         Ok(torrents.into_iter().map(map_torrent).collect())
     }

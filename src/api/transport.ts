@@ -54,7 +54,7 @@ export const HTTP_ROUTES: Record<string, Route> = {
   resume_batch: { method: "POST", path: "/api/batches/{batch_id}/resume", params: { batch_id: "batchId" } },
   retry_batch: { method: "POST", path: "/api/batches/{batch_id}/retry", params: { batch_id: "batchId" } },
   // Torrents
-  list_torrents: { method: "GET", path: "/api/torrents", query: ["page", "limit"] },
+  list_torrents: { method: "GET", path: "/api/torrents" },
   add_magnet: { method: "POST", path: "/api/torrents/magnet", body: ["magnet"] },
   add_torrent_file: { method: "POST", path: "/api/torrents/file", body: ["fileBytes"] },
   retry_torrent: { method: "POST", path: "/api/torrents/retry", body: ["hash", "copies"] },

@@ -653,8 +653,10 @@ async fn retry_batch(State(s): State<ServerState>, Path(batch_id): Path<String>)
 
 // Torrents
 
-async fn list_torrents(State(s): State<ServerState>, Params(q): Params<PageQuery>) -> ApiResult<Vec<Torrent>> {
-    Ok(Json(service::torrents::list_torrents(&s.state, q.page, q.limit).await?))
+/// Every torrent, all pages of every provider (no paging: the merged list is only whole once every
+/// page is in).
+async fn list_torrents(State(s): State<ServerState>) -> ApiResult<Vec<Torrent>> {
+    Ok(Json(service::torrents::list_torrents(&s.state).await?))
 }
 
 /// `?provider=<id>`: which provider a torrent id belongs to (the primary one when left out).
@@ -1125,11 +1127,11 @@ mod tests {
         }
         async fn add_magnet(&self, magnet: &str) -> Result<AddTorrentResponse, ProviderError> {
             self.log(format!("magnet:{}", magnet));
-            Ok(AddTorrentResponse { id: "new".into(), provider: String::new() })
+            Ok(AddTorrentResponse { id: "new".into(), provider: String::new(), ..Default::default() })
         }
         async fn add_torrent_file(&self, bytes: &[u8]) -> Result<AddTorrentResponse, ProviderError> {
             self.log(format!("file:{}", bytes.len()));
-            Ok(AddTorrentResponse { id: "file".into(), provider: String::new() })
+            Ok(AddTorrentResponse { id: "file".into(), provider: String::new(), ..Default::default() })
         }
         async fn select_files(&self, id: &str, file_ids: &[u64]) -> Result<(), ProviderError> {
             *self.selected.lock().unwrap() = Some((id.into(), file_ids.to_vec()));
@@ -2034,9 +2036,8 @@ mod tests {
     async fn torrent_routes_reach_the_active_provider() {
         let h = harness().await;
 
-        let list = ok(&h, Method::GET, "/api/torrents?page=2&limit=5", None).await;
+        let list = ok(&h, Method::GET, "/api/torrents", None).await;
         assert_eq!(list[0]["id"], "t1");
-        ok(&h, Method::GET, "/api/torrents", None).await;
         assert_eq!(ok(&h, Method::GET, "/api/torrents/t1", None).await["id"], "t1");
 
         let added = ok(&h, Method::POST, "/api/torrents/magnet", Some(json!({ "magnet": "magnet:?xt=urn:btih:abc" }))).await;
@@ -2057,8 +2058,7 @@ mod tests {
         assert_eq!(
             h.fake.calls(),
             vec![
-                "list:2:5",
-                "list:1:100",
+                "list:1:1000",
                 "magnet:magnet:?xt=urn:btih:abc",
                 "file:4",
                 "link:t9:4",
@@ -2088,7 +2088,7 @@ mod tests {
             // No JSON body at all.
             (Method::POST, "/api/auth/token", None, StatusCode::UNSUPPORTED_MEDIA_TYPE),
             // Bad query string.
-            (Method::GET, "/api/torrents?page=abc", None, StatusCode::BAD_REQUEST),
+            (Method::GET, "/api/downloads/history?page=abc", None, StatusCode::BAD_REQUEST),
             (Method::GET, "/api/search", None, StatusCode::BAD_REQUEST),
         ];
         for (method, path, body, want) in bad {

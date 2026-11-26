@@ -230,6 +230,11 @@ impl DebridProvider for PremiumizeClient {
             .collect())
     }
 
+    /// One request: Premiumize always sends every transfer.
+    async fn list_all_torrents(&self) -> Result<Vec<shared::Torrent>, shared::ProviderError> {
+        self.list_torrents(1, u32::MAX).await
+    }
+
     async fn torrent_info(&self, id: &str) -> Result<shared::TorrentInfo, shared::ProviderError> {
         let transfer = self.find_transfer(id).await?;
         let status = map_status(transfer.status.as_deref().unwrap_or("unknown"));
@@ -306,6 +311,7 @@ impl DebridProvider for PremiumizeClient {
         Ok(shared::AddTorrentResponse {
             id: resp.id.unwrap_or_default(),
             provider: String::new(),
+            ..Default::default()
         })
     }
 
@@ -340,6 +346,7 @@ impl DebridProvider for PremiumizeClient {
         Ok(shared::AddTorrentResponse {
             id: api_resp.id.unwrap_or_default(),
             provider: String::new(),
+            ..Default::default()
         })
     }
 

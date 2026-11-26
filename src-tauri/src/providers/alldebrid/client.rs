@@ -165,7 +165,7 @@ impl AllDebridClient {
             return Err(api_error(Some(err), &format!("AllDebrid couldn't add this {}", what)));
         }
         item.id
-            .map(|id| shared::AddTorrentResponse { id, provider: String::new() })
+            .map(|id| shared::AddTorrentResponse { id, provider: String::new(), ..Default::default() })
             .ok_or_else(|| shared::ProviderError::Other("AllDebrid returned no magnet id".to_string()))
     }
 }
@@ -300,6 +300,11 @@ impl DebridProvider for AllDebridClient {
             .take(limit as usize)
             .map(map_torrent)
             .collect())
+    }
+
+    /// One request: AllDebrid always sends every magnet.
+    async fn list_all_torrents(&self) -> Result<Vec<shared::Torrent>, shared::ProviderError> {
+        Ok(self.all_magnets().await?.iter().map(map_torrent).collect())
     }
 
     async fn torrent_info(&self, id: &str) -> Result<shared::TorrentInfo, shared::ProviderError> {

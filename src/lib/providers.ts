@@ -1,4 +1,4 @@
-import type { Torrent, TorrentCopy } from "../types";
+import type { AddTorrentResponse, Torrent, TorrentCopy } from "../types";
 
 export const PROVIDER_NAMES: Record<string, string> = {
   "real-debrid": "Real-Debrid",
@@ -24,4 +24,13 @@ export function torrentCopies(t: Torrent): TorrentCopy[] {
 export function torrentKey(t: Torrent): string {
   const first = torrentCopies(t)[0];
   return `${first.provider}:${first.id}`;
+}
+
+/**
+ * What to tell the user when an add landed somewhere but some providers turned it down, e.g.
+ * "Not added to AllDebrid: File not available due to no peer". Empty when every provider took it.
+ */
+export function rejectedNotice(res: AddTorrentResponse): string {
+  const rejected = res.rejected ?? [];
+  return rejected.length > 0 ? `Not added to ${rejected.join("; ")}` : "";
 }

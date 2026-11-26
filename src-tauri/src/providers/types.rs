@@ -160,12 +160,16 @@ pub struct TorrentInfo {
     pub provider: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AddTorrentResponse {
     pub id: String,
     /// Id of the provider the torrent was added to. Filled in by the service layer.
     #[serde(default)]
     pub provider: String,
+    /// Providers that turned the torrent down while another took it, as "Name: reason". Filled in
+    /// by the service layer.
+    #[serde(default)]
+    pub rejected: Vec<String>,
 }
 
 /// How to obtain a fresh URL for a file when its debrid link expires.

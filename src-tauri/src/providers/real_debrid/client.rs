@@ -243,11 +243,19 @@ impl RdClient {
     ) -> Result<Vec<RdTorrent>, ProviderError> {
         let page_str = page.unwrap_or(1).to_string();
         let limit_str = limit.unwrap_or(100).to_string();
-        self.get_with_params(
-            "/torrents",
-            &[("page", page_str.as_str()), ("limit", limit_str.as_str())],
-        )
-        .await
+        let token = self.get_token().await?;
+        let resp = self
+            .http
+            .get(format!("{}/torrents", BASE_URL))
+            .header("Authorization", format!("Bearer {}", token))
+            .query(&[("page", page_str.as_str()), ("limit", limit_str.as_str())])
+            .send()
+            .await?;
+        // A page past the end comes back 204 with no body.
+        if resp.status() == StatusCode::NO_CONTENT {
+            return Ok(Vec::new());
+        }
+        self.handle_response(resp).await
     }
 
     pub async fn rd_torrent_info(&self, id: &str) -> Result<RdTorrentInfo, ProviderError> {
@@ -455,12 +463,12 @@ impl DebridProvider for RdClient {
 
     async fn add_magnet(&self, magnet: &str) -> Result<shared::AddTorrentResponse, shared::ProviderError> {
         let resp = self.rd_add_magnet(magnet).await?;
-        Ok(shared::AddTorrentResponse { id: resp.id, provider: String::new() })
+        Ok(shared::AddTorrentResponse { id: resp.id, provider: String::new(), ..Default::default() })
     }
 
     async fn add_torrent_file(&self, bytes: &[u8]) -> Result<shared::AddTorrentResponse, shared::ProviderError> {
         let resp = self.rd_add_torrent_file(bytes.to_vec()).await?;
-        Ok(shared::AddTorrentResponse { id: resp.id, provider: String::new() })
+        Ok(shared::AddTorrentResponse { id: resp.id, provider: String::new(), ..Default::default() })
     }
 
     async fn select_files(&self, id: &str, file_ids: &[u64]) -> Result<(), shared::ProviderError> {

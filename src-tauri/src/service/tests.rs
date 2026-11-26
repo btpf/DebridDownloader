@@ -131,14 +131,14 @@ impl DebridProvider for FakeProvider {
         if let Some(e) = &self.add_error {
             return Err(ProviderError::Other(e.clone()));
         }
-        Ok(AddTorrentResponse { id: "new".into(), provider: String::new() })
+        Ok(AddTorrentResponse { id: "new".into(), provider: String::new(), ..Default::default() })
     }
     async fn add_torrent_file(&self, bytes: &[u8]) -> Result<AddTorrentResponse, ProviderError> {
         self.log(format!("file:{}", bytes.len()));
         if let Some(e) = &self.add_error {
             return Err(ProviderError::Other(e.clone()));
         }
-        Ok(AddTorrentResponse { id: "file".into(), provider: String::new() })
+        Ok(AddTorrentResponse { id: "file".into(), provider: String::new(), ..Default::default() })
     }
     async fn select_files(&self, id: &str, file_ids: &[u64]) -> Result<(), ProviderError> {
         *self.selected.lock().unwrap() = Some((id.into(), file_ids.to_vec()));
@@ -325,8 +325,7 @@ async fn torrent_commands_go_to_the_active_provider() {
     let fake = FakeProvider::new("good");
     let env = env().with_provider("torbox", fake.clone()).await;
 
-    assert_eq!(torrents::list_torrents(&env.state, None, None).await.unwrap()[0].id, "t1");
-    torrents::list_torrents(&env.state, Some(2), Some(50)).await.unwrap();
+    assert_eq!(torrents::list_torrents(&env.state).await.unwrap()[0].id, "t1");
     assert_eq!(torrents::add_magnet(&env.state, "magnet:?xt=urn:btih:abc").await.unwrap().id, "new");
     assert_eq!(torrents::add_torrent_file(&env.state, &[1, 2, 3]).await.unwrap().id, "file");
     torrents::delete_torrent(&env.state, "t1", None).await.unwrap();
@@ -339,7 +338,7 @@ async fn torrent_commands_go_to_the_active_provider() {
 
     assert_eq!(
         fake.calls(),
-        vec!["list:1:100", "list:2:50", "magnet:magnet:?xt=urn:btih:abc", "file:3", "delete:t1"]
+        vec!["list:1:1000", "magnet:magnet:?xt=urn:btih:abc", "file:3", "delete:t1"]
     );
 }
 
@@ -426,6 +425,14 @@ async fn add_to_all_providers_adds_everywhere_and_skips_disabled_ones() {
     let first = torrents::add_magnet(&env.state, "m").await.unwrap();
     assert_eq!(first.provider, "torbox");
     assert_eq!(c.selected.lock().unwrap().clone(), Some(("new".to_string(), vec![])));
+    // The one that turned it down is reported alongside the landing.
+    assert_eq!(first.rejected, ["AllDebrid: Not cached"]);
+}
+
+#[tokio::test]
+async fn a_clean_add_reports_no_rejections() {
+    let env = env().with_provider("torbox", FakeProvider::new("good")).await;
+    assert!(torrents::add_magnet(&env.state, "m").await.unwrap().rejected.is_empty());
 }
 
 #[tokio::test]
@@ -437,7 +444,7 @@ async fn listing_merges_enabled_providers_and_tags_each_torrent() {
         .await;
     env.state.install_provider("premiumize", FakeProvider::new("good")).await; // not enabled
 
-    let list = torrents::list_torrents(&env.state, None, None).await.unwrap();
+    let list = torrents::list_torrents(&env.state).await.unwrap();
     // Both fakes hold the same torrent (same hash), so it's one row with two copies.
     assert_eq!(list.len(), 1);
     let copies: Vec<&str> = list[0].copies.iter().map(|c| c.provider.as_str()).collect();
@@ -449,7 +456,7 @@ async fn listing_merges_enabled_providers_and_tags_each_torrent() {
         let mut s = none.state.settings.write().await;
         s.providers = vec![ProviderPref { id: "real-debrid".into(), enabled: false }];
     }
-    assert!(torrents::list_torrents(&none.state, None, None).await.unwrap_err().contains("No debrid provider"));
+    assert!(torrents::list_torrents(&none.state).await.unwrap_err().contains("No debrid provider"));
 }
 
 fn listed(id: &str, name: &str, hash: &str, status: &str) -> Torrent {

@@ -3,16 +3,16 @@ use crate::providers::DebridProvider;
 use crate::state::AppState;
 use std::sync::Arc;
 
-/// Torrents of every enabled, signed-in provider, merged across providers (see [`merge_torrents`]).
-/// Providers are asked concurrently; one that fails is logged and left out, unless they all fail.
-pub async fn list_torrents(state: &AppState, page: Option<u32>, limit: Option<u32>) -> Result<Vec<Torrent>, String> {
+/// Every torrent of every enabled, signed-in provider (all pages), merged across providers (see
+/// [`merge_torrents`]). Providers are asked concurrently; one that fails is logged and left out,
+/// unless they all fail.
+pub async fn list_torrents(state: &AppState) -> Result<Vec<Torrent>, String> {
     let active = state.active_providers().await;
     if active.is_empty() {
         return Err(NO_PROVIDER.to_string());
     }
-    let (page, limit) = (page.unwrap_or(1), limit.unwrap_or(100));
     let results = futures::future::join_all(active.iter().map(|(id, p)| async move {
-        (id.clone(), p.list_torrents(page, limit).await)
+        (id.clone(), p.list_all_torrents().await)
     }))
     .await;
     let mut lists = Vec::new();
@@ -142,6 +142,12 @@ fn provider_name(id: &str) -> String {
 /// it, falling back down the list on failure. Returns where it landed, in priority order.
 /// Errors only when no provider took it.
 pub async fn add_routed(state: &AppState, source: TorrentSource<'_>) -> Result<Vec<Added>, String> {
+    add_routed_reporting(state, source).await.map(|(added, _)| added)
+}
+
+/// [`add_routed`], also returning the providers that turned it down as "Name: reason" (only
+/// when another one took it; otherwise their reasons are the error).
+async fn add_routed_reporting(state: &AppState, source: TorrentSource<'_>) -> Result<(Vec<Added>, Vec<String>), String> {
     let active = state.active_providers().await;
     if active.is_empty() {
         return Err(NO_PROVIDER.to_string());
@@ -183,21 +189,25 @@ pub async fn add_routed(state: &AppState, source: TorrentSource<'_>) -> Result<V
             .collect::<Vec<_>>()
             .join("; "));
     }
-    Ok(added)
+    let rejected = errors.into_iter().map(|(id, e)| format!("{}: {}", provider_name(&id), e)).collect();
+    Ok((added, rejected))
 }
 
 /// Add a torrent (see [`add_routed`]) and select every file on each provider it landed on, so it
 /// starts right away. A failed selection is logged, not returned: the torrent then waits for a
-/// file selection in the Torrents inspector. Returns the highest-priority landing.
+/// file selection in the Torrents inspector. Returns the highest-priority landing, with
+/// `rejected` naming the providers that turned it down.
 async fn add_and_select_all(state: &AppState, source: TorrentSource<'_>) -> Result<AddTorrentResponse, String> {
-    let added = add_routed(state, source).await?;
+    let (added, rejected) = add_routed_reporting(state, source).await?;
     let selections = futures::future::join_all(added.iter().map(|a| a.provider.select_files(&a.response.id, &[]))).await;
     for (a, result) in added.iter().zip(selections) {
         if let Err(e) = result {
             log::warn!("Selecting the files of {} on {} failed: {}", a.response.id, a.response.provider, e);
         }
     }
-    Ok(added.into_iter().next().map(|a| a.response).expect("add_routed returns at least one"))
+    let mut first = added.into_iter().next().map(|a| a.response).expect("add_routed returns at least one");
+    first.rejected = rejected;
+    Ok(first)
 }
 
 pub async fn add_magnet(state: &AppState, magnet: &str) -> Result<AddTorrentResponse, String> {

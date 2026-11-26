@@ -10,6 +10,7 @@ import { AuthContext, primaryUser, type AuthState } from "./hooks/useAuth";
 import { useMagnetLinkListener } from "./hooks/useMagnetLinkListener";
 import * as authApi from "./api/auth";
 import * as torrentsApi from "./api/torrents";
+import { rejectedNotice } from "./lib/providers";
 import { getProviderAccounts } from "./api/providers";
 import type { ProviderAccount } from "./types";
 
@@ -68,7 +69,9 @@ function App() {
   const handleMagnetLink = useCallback(
     (event: { uri: string; displayName: string | null }) => {
       // The backend selects every file where the torrent lands, so it starts right away.
-      torrentsApi.addMagnet(event.uri).then(() => {
+      torrentsApi.addMagnet(event.uri).then((res) => {
+        const notice = rejectedNotice(res);
+        if (notice) setMagnetError(notice);
         clearCurrentUriRef.current();
         navigateRef.current?.("/torrents");
       }).catch((e) => {

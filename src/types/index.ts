@@ -107,6 +107,8 @@ export interface AddTorrentResponse {
   id: string;
   /** Provider the torrent was added to (the highest-priority one when added to several). */
   provider: string;
+  /** Providers that turned it down while another took it, as "Name: reason". */
+  rejected?: string[];
 }
 
 // ── Downloads ──

@@ -2,11 +2,13 @@ import { useState } from "react";
 import { open as openFile } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
 import * as torrentsApi from "../api/torrents";
+import { rejectedNotice } from "../lib/providers";
 import { Button, Dialog, Input } from "./ui";
 
 interface Props {
   onClose: () => void;
-  onAdded: () => void;
+  /** `notice`: providers that turned it down ("" when none did). */
+  onAdded: (notice: string) => void;
   initialMagnet?: string;
 }
 
@@ -24,8 +26,7 @@ export default function AddTorrentModal({ onClose, onAdded, initialMagnet }: Pro
     setError("");
     try {
       // The backend picks the provider(s) and selects every file.
-      await torrentsApi.addMagnet(magnet.trim());
-      onAdded();
+      onAdded(rejectedNotice(await torrentsApi.addMagnet(magnet.trim())));
       onClose();
     } catch (e) {
       setError(String(e));
@@ -44,8 +45,7 @@ export default function AddTorrentModal({ onClose, onAdded, initialMagnet }: Pro
     setError("");
     try {
       const bytes = await readFile(selected as string);
-      await torrentsApi.addTorrentFile(Array.from(bytes));
-      onAdded();
+      onAdded(rejectedNotice(await torrentsApi.addTorrentFile(Array.from(bytes))));
       onClose();
     } catch (e) {
       setError(String(e));

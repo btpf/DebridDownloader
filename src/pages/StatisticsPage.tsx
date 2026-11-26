@@ -163,7 +163,7 @@ export default function StatisticsPage() {
     setRefreshing(true);
     try {
       const providers = activeKeyRef.current;
-      const data = await listTorrents(1, 500);
+      const data = await listTorrents();
       setCachedTorrents(data, providers);
       setTorrents(data);
       setError("");

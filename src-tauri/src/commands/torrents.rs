@@ -5,12 +5,8 @@ use crate::state::AppState;
 use tauri::State;
 
 #[tauri::command]
-pub async fn list_torrents(
-    state: State<'_, AppState>,
-    page: Option<u32>,
-    limit: Option<u32>,
-) -> Result<Vec<Torrent>, String> {
-    svc::list_torrents(&state, page, limit).await
+pub async fn list_torrents(state: State<'_, AppState>) -> Result<Vec<Torrent>, String> {
+    svc::list_torrents(&state).await
 }
 
 #[tauri::command]

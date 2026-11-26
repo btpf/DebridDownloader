@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import * as torrentsApi from "../api/torrents";
+import { rejectedNotice } from "../lib/providers";
 import Toast from "./Toast";
 
 const isTorrentFile = (f: File) => f.name.toLowerCase().endsWith(".torrent");
@@ -52,7 +53,8 @@ export default function TorrentDropZone() {
       for (const file of torrents) {
         try {
           const bytes = new Uint8Array(await file.arrayBuffer());
-          await torrentsApi.addTorrentFile(Array.from(bytes));
+          const notice = rejectedNotice(await torrentsApi.addTorrentFile(Array.from(bytes)));
+          if (notice) failures.push(`${file.name}: ${notice}`);
           added += 1;
         } catch (err) {
           failures.push(`${file.name}: ${String(err)}`);

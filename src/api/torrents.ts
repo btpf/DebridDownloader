@@ -1,11 +1,9 @@
 import { call } from "./transport";
 import type { AddTorrentResponse, Torrent, TorrentInfo } from "../types";
 
-export async function listTorrents(
-  page?: number,
-  limit?: number
-): Promise<Torrent[]> {
-  return call("list_torrents", { page: page ?? null, limit: limit ?? null });
+/** Every torrent on every enabled provider (all pages), one row per torrent across providers. */
+export async function listTorrents(): Promise<Torrent[]> {
+  return call("list_torrents", {});
 }
 
 /** `provider`: the provider `id` belongs to (the primary provider when left out). */
