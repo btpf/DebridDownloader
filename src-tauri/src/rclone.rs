@@ -29,6 +29,21 @@ pub fn emit_progress(events: &dyn AppEvents, task: &DownloadTask) {
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+/// How long to wait for the server to start answering.
+const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Resolves once the watch says cancelled. Never resolves if the sender goes away uncancelled.
+async fn cancelled(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow_and_update() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RcloneInfo {
     pub version: String,
@@ -111,13 +126,22 @@ pub async fn download_to_rclone(
     cancel_rx: &mut tokio::sync::watch::Receiver<bool>,
     speed_limit: Option<u64>,
 ) -> Result<(), String> {
-    // Start HTTP stream from debrid URL
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&task.url)
-        .send()
-        .await
+    // Start HTTP stream from debrid URL. A cancel or a silent server must not leave us waiting.
+    let client = reqwest::Client::builder()
+        .connect_timeout(RESPONSE_TIMEOUT)
+        .build()
         .map_err(|e| format!("Failed to start download: {}", e))?;
+    let resp = tokio::select! {
+        _ = cancelled(cancel_rx) => {
+            task.status = DownloadStatus::Cancelled;
+            emit_progress(events, task);
+            return Ok(());
+        }
+        r = tokio::time::timeout(RESPONSE_TIMEOUT, client.get(&task.url).send()) => match r {
+            Err(_) => return Err("Failed to start download: the server didn't respond".to_string()),
+            Ok(r) => r.map_err(|e| format!("Failed to start download: {}", e))?,
+        },
+    };
 
     if !resp.status().is_success() {
         return Err(format!("Download failed with status {}", resp.status()));
@@ -164,12 +188,18 @@ pub async fn download_to_rclone(
     let mut speed_bytes: i64 = 0;
     let mut speed_start = std::time::Instant::now();
 
-    let pipe_result: Result<(), String> = loop {
+    // Ok(false): cancelled.
+    let pipe_result: Result<bool, String> = loop {
         tokio::select! {
             chunk = stream.next() => {
                 match chunk {
                     Some(Ok(bytes)) => {
-                        if let Err(e) = stdin.write_all(&bytes).await {
+                        // rclone applies backpressure while it uploads; a cancel must not wait on it.
+                        let written = tokio::select! {
+                            _ = cancelled(cancel_rx) => break Ok(false),
+                            w = stdin.write_all(&bytes) => w,
+                        };
+                        if let Err(e) = written {
                             break Err(format!("Failed to write to rclone: {}", e));
                         }
                         downloaded += bytes.len() as i64;
@@ -190,7 +220,10 @@ pub async fn download_to_rclone(
                                 let target = speed_bytes as f64 / limit as f64;
                                 let sleep = target - el;
                                 if sleep > 0.0 {
-                                    tokio::time::sleep(std::time::Duration::from_secs_f64(sleep)).await;
+                                    tokio::select! {
+                                        _ = cancelled(cancel_rx) => break Ok(false),
+                                        _ = tokio::time::sleep(std::time::Duration::from_secs_f64(sleep)) => {}
+                                    }
                                 }
                             }
                         }
@@ -203,30 +236,30 @@ pub async fn download_to_rclone(
                     Some(Err(e)) => {
                         break Err(format!("Download stream error: {}", e));
                     }
-                    None => break Ok(()),
+                    None => break Ok(true),
                 }
             }
-            _ = cancel_rx.changed() => {
-                if *cancel_rx.borrow() {
-                    // Kill rclone process
-                    let _ = child.kill().await;
-
-                    // Clean up partial remote file (fire-and-forget)
-                    let dest = task.destination.clone();
-                    tokio::spawn(async move {
-                        let _ = Command::new("rclone")
-                            .args(["deletefile", &dest])
-                            .output()
-                            .await;
-                    });
-
-                    task.status = DownloadStatus::Cancelled;
-                    emit_progress(events, task);
-                    return Ok(());
-                }
-            }
+            _ = cancelled(cancel_rx) => break Ok(false),
         }
     };
+
+    if let Ok(false) = pipe_result {
+        // Kill rclone process
+        let _ = child.kill().await;
+
+        // Clean up partial remote file (fire-and-forget)
+        let dest = task.destination.clone();
+        tokio::spawn(async move {
+            let _ = Command::new("rclone")
+                .args(["deletefile", &dest])
+                .output()
+                .await;
+        });
+
+        task.status = DownloadStatus::Cancelled;
+        emit_progress(events, task);
+        return Ok(());
+    }
 
     // Close stdin to signal EOF to rclone
     drop(stdin);

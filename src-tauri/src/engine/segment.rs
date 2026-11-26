@@ -194,11 +194,21 @@ pub async fn run_segment(
             break;
         }
         let take = ((end_now - pos + 1).min(chunk.len() as u64)) as usize;
-        ctx.limiter.acquire(take).await;
+        // The speed-limit wait can be long at a low limit; a stop cuts it short. The bytes are
+        // already in hand, so keep them: write, checkpoint, then stop.
+        let stopped = tokio::select! {
+            biased;
+            _ = ctx.limiter.acquire(take) => false,
+            _ = ctx.cancel.cancelled() => true,
+        };
         file.write_all(&chunk[..take]).await.map_err(disk)?;
         pos += take as u64;
         unsynced += take as u64;
         let _ = tx.send(SegmentMsg::Bytes { index, n: take as u64 });
+        if stopped {
+            checkpoint(&mut file, index, start, pos, tx).await?;
+            return Err(SegmentError::Cancelled);
+        }
 
         if unsynced >= ctx.checkpoint_bytes || last_sync.elapsed() >= ctx.checkpoint_interval {
             checkpoint(&mut file, index, start, pos, tx).await?;

@@ -997,6 +997,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "which",
+ "windows-sys 0.61.2",
  "winreg 0.52.0",
  "xz2",
  "zip 2.4.2",

@@ -9,6 +9,7 @@ pub mod rar_remote;
 pub mod refresh;
 pub mod remote;
 pub mod segment;
+pub mod sparse;
 pub mod store;
 pub mod transfer;
 pub mod types;

@@ -61,7 +61,7 @@ Secrets (API tokens, OAuth client id/secret, refresh tokens) live in the OS keyr
 
 ### Downloads
 
-`engine/` is the download engine (Tauri-free; see `specs/2026-09-23-resilient-download-engine-design.md`). One actor (`engine/actor.rs`) owns all jobs, persisted to `{app_data_dir}/downloads.json`. Transfers write `{dest}.part` with segmented `Range` requests and durable checkpoints, then rename. `engine_host.rs` adapts it to Tauri (events, provider link refresh, rclone). `commands/downloads.rs` is a thin IPC layer. Post-download extract/organize runs in `engine/pipeline.rs`; media-server scans fire on `BatchFinished`.
+`engine/` is the download engine (Tauri-free; see `specs/2026-09-23-resilient-download-engine-design.md`). One actor (`engine/actor.rs`) owns all jobs, persisted to `{app_data_dir}/downloads.json`. Transfers write `{dest}.part` with segmented `Range` requests and durable checkpoints, then rename. The `.part` is created sparse (`engine/sparse.rs`, Windows `FSCTL_SET_SPARSE`) unless `AppSettings.sparse_downloads` (Settings → Advanced) is off, because NTFS otherwise zero-fills ahead of each segment's first write, which can't be cancelled; every network and speed-limit wait in a transfer races the cancel token. `engine_host.rs` adapts it to Tauri (events, provider link refresh, rclone). `commands/downloads.rs` is a thin IPC layer. Post-download extract/organize runs in `engine/pipeline.rs`; media-server scans fire on `BatchFinished`.
 
 ### Frontend conventions
 

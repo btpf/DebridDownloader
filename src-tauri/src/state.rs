@@ -68,6 +68,14 @@ pub struct AppSettings {
     /// running) or "quit".
     #[serde(default = "default_close_action")]
     pub close_action: String,
+    /// Create downloads as sparse files, so nothing has to be zero-filled ahead of the writes
+    /// (on Windows that can block a large download for many minutes). Off: preallocate.
+    #[serde(default = "default_true")]
+    pub sparse_downloads: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_close_action() -> String {
@@ -136,6 +144,7 @@ impl AppSettings {
                 tmdb_api_key: self.tmdb_api_key.clone(),
                 rar_tool,
             },
+            sparse_files: self.sparse_downloads,
         }
     }
 }
@@ -169,6 +178,7 @@ impl Default for AppSettings {
             providers: Vec::new(),
             add_to_all_providers: false,
             close_action: default_close_action(),
+            sparse_downloads: true,
         }
     }
 }

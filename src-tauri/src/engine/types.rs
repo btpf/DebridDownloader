@@ -205,11 +205,13 @@ pub struct EngineConfig {
     pub segments_per_file: u32,
     pub speed_limit_bytes: Option<u64>,
     pub post: PostConfig,
+    /// Create `.part` files sparse (Windows; elsewhere they already are).
+    pub sparse_files: bool,
 }
 
 impl Default for EngineConfig {
     fn default() -> Self {
-        Self { max_concurrent: 3, segments_per_file: 4, speed_limit_bytes: None, post: PostConfig::default() }
+        Self { max_concurrent: 3, segments_per_file: 4, speed_limit_bytes: None, post: PostConfig::default(), sparse_files: true }
     }
 }
 

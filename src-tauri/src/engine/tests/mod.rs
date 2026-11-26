@@ -12,3 +12,4 @@ pub mod pipeline_tests;
 mod engine_tests;
 mod zip_tests;
 mod rar_tests;
+mod cancel_tests;

@@ -523,6 +523,19 @@ fn the_close_button_asks_unless_a_choice_was_saved() {
 }
 
 #[test]
+fn downloads_are_sparse_unless_turned_off() {
+    let s = AppSettings::default();
+    assert!(s.sparse_downloads);
+    assert!(s.engine_config(crate::extractor::RarTool::None).sparse_files);
+    // A blob saved before the setting existed still loads, sparse.
+    let mut blob = serde_json::to_value(AppSettings::default()).unwrap();
+    blob.as_object_mut().unwrap().remove("sparse_downloads");
+    assert!(serde_json::from_value::<AppSettings>(blob).unwrap().sparse_downloads);
+    let off = AppSettings { sparse_downloads: false, ..AppSettings::default() };
+    assert!(!off.engine_config(crate::extractor::RarTool::None).sparse_files);
+}
+
+#[test]
 fn provider_prefs_come_from_the_legacy_provider_and_stay_complete() {
     let mut legacy = AppSettings { provider: "torbox".into(), ..AppSettings::default() };
     let prefs = legacy.provider_prefs();

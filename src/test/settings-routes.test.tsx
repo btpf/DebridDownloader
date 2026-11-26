@@ -28,6 +28,7 @@ describe("settings routes redirect", () => {
     ["/settings/nope", "General"],
     ["/about", "About & Backup"],
     ["/settings/search", "Search"],
+    ["/settings/advanced", "Advanced"],
   ])("%s lands on %s", async (path, heading) => {
     at(path);
     expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeInTheDocument();

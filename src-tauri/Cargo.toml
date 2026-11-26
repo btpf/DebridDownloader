@@ -96,6 +96,7 @@ dirs = "6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_IO", "Win32_System_Ioctl"] }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 libc = "0.2"

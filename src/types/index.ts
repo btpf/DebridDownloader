@@ -256,6 +256,8 @@ export interface AppSettings {
   add_to_all_providers?: boolean;
   /** What the window's close button does. */
   close_action?: CloseAction;
+  /** Create downloads as sparse files (default on). Off preallocates the full size. */
+  sparse_downloads?: boolean;
 }
 
 /** "ask" shows the close dialog; "tray" hides the window (downloads keep running); "quit" exits. */

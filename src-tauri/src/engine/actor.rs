@@ -122,6 +122,7 @@ impl Actor {
         let saver = spawn_saver(store);
         let mut transfer_cfg = deps.transfer;
         transfer_cfg.segments_per_file = deps.config.segments_per_file.clamp(1, 16);
+        transfer_cfg.sparse_files = deps.config.sparse_files;
         let actor = Actor {
             jobs,
             running: HashMap::new(),
@@ -198,6 +199,7 @@ impl Actor {
                 let rate = cfg.speed_limit_bytes;
                 tokio::spawn(async move { limiter.set_rate(rate).await });
                 self.transfer_cfg.segments_per_file = cfg.segments_per_file.clamp(1, 16);
+                self.transfer_cfg.sparse_files = cfg.sparse_files;
                 self.config = cfg;
                 self.schedule();
             }

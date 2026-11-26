@@ -29,6 +29,8 @@ pub struct TransferConfig {
     pub checkpoint_bytes: u64,
     pub checkpoint_interval: Duration,
     pub progress_interval: Duration,
+    /// Mark new `.part` files sparse (see [`super::sparse`]). Off: preallocate with `set_len` only.
+    pub sparse_files: bool,
 }
 
 impl Default for TransferConfig {
@@ -44,6 +46,7 @@ impl Default for TransferConfig {
             checkpoint_bytes: 8 * 1024 * 1024,
             checkpoint_interval: Duration::from_secs(2),
             progress_interval: Duration::from_millis(250),
+            sparse_files: true,
         }
     }
 }
@@ -174,12 +177,19 @@ fn ensure_space(dest: &str, needed: u64) -> Result<(), TransferError> {
     }
 }
 
-async fn prepare_part(part: &Path, total: Option<u64>) -> Result<(), TransferError> {
+async fn prepare_part(part: &Path, total: Option<u64>, sparse: bool) -> Result<(), TransferError> {
     let fatal = |e: std::io::Error| TransferError::Fatal(format!("Disk error: {e}"));
     if let Some(parent) = part.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(fatal)?;
     }
     let f = tokio::fs::File::create(part).await.map_err(fatal)?;
+    if sparse && total.is_some_and(|t| t > 0) {
+        // Before `set_len`, so unwritten ranges never need zero-filling. Some filesystems
+        // (FAT32, exFAT) can't do it; preallocating as before still works there.
+        if let Err(e) = super::sparse::mark_sparse(&f) {
+            log::warn!("Couldn't make {} sparse ({e}); preallocating it instead", part.display());
+        }
+    }
     if let Some(t) = total {
         f.set_len(t).await.map_err(fatal)?;
     }
@@ -248,17 +258,37 @@ async fn finalize(job: &Job, cancel: &CancellationToken, tx: &UpdateTx) -> Resul
     Ok(TransferOutcome::Finished)
 }
 
-async fn refresh_or_fail(job: &mut Job, deps: &TransferDeps, tx: &UpdateTx, refreshed: &mut bool, why: &str) -> Result<(), TransferError> {
+/// Run `fut` unless `cancel` fires first (then `None`).
+async fn unless_cancelled<T>(cancel: &CancellationToken, fut: impl std::future::Future<Output = T>) -> Option<T> {
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        r = fut => Some(r),
+    }
+}
+
+/// Refresh the link once. `Ok(false)`: cancelled while waiting on the provider.
+async fn refresh_or_fail(
+    job: &mut Job,
+    deps: &TransferDeps,
+    cancel: &CancellationToken,
+    tx: &UpdateTx,
+    refreshed: &mut bool,
+    why: &str,
+) -> Result<bool, TransferError> {
     if *refreshed {
         return Err(TransferError::Fatal(format!("Link expired and couldn't be refreshed: {why}")));
     }
     *refreshed = true;
-    match deps.refresher.refresh(&job.source).await {
+    let Some(res) = unless_cancelled(cancel, deps.refresher.refresh(&job.source)).await else {
+        return Ok(false);
+    };
+    match res {
         Ok(l) => {
             log::info!("Refreshed link for {} ({})", job.filename, job.id);
             job.url = l.url.clone();
             let _ = tx.send(TransferUpdate::Url(l.url));
-            Ok(())
+            Ok(true)
         }
         Err(RefreshError::ProviderMismatch(p)) => Err(TransferError::Fatal(format!("Sign in to {p} to resume"))),
         Err(e) => Err(TransferError::Fatal(format!("Link expired and couldn't be refreshed: {e}"))),
@@ -282,11 +312,13 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
         let mut base = 0u64;
         let p = if let Some(spec) = &zip {
             if spec.compressed_size == 0 {
-                prepare_part(&part, Some(0)).await?;
+                prepare_part(&part, Some(0), false).await?;
                 job.total_bytes = 0;
                 return finalize(&job, &cancel, &tx).await;
             }
-            match zip_remote::data_offset(&deps.client, &job.url, spec, deps.cfg.idle_timeout).await {
+            let found = unless_cancelled(&cancel, zip_remote::data_offset(&deps.client, &job.url, spec, deps.cfg.idle_timeout));
+            let Some(found) = found.await else { return Ok(TransferOutcome::Stopped) };
+            match found {
                 Ok((_, total)) if total != spec.archive_size => {
                     return Err(TransferError::Fatal("The archive changed on the server; open its contents again".into()));
                 }
@@ -295,7 +327,9 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
                     Probe { total: Some(spec.compressed_size), ranges: true }
                 }
                 Err(SegmentError::DeadLink(why)) => {
-                    refresh_or_fail(&mut job, &deps, &tx, &mut refreshed, &why).await?;
+                    if !refresh_or_fail(&mut job, &deps, &cancel, &tx, &mut refreshed, &why).await? {
+                        return Ok(TransferOutcome::Stopped);
+                    }
                     continue;
                 }
                 Err(SegmentError::RangeIgnored) => {
@@ -307,10 +341,15 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
                 }
             }
         } else {
-            match probe(&deps.client, &job.url, deps.cfg.idle_timeout).await {
+            let Some(probed) = unless_cancelled(&cancel, probe(&deps.client, &job.url, deps.cfg.idle_timeout)).await else {
+                return Ok(TransferOutcome::Stopped);
+            };
+            match probed {
                 Ok(p) => p,
                 Err(SegmentError::DeadLink(why)) => {
-                    refresh_or_fail(&mut job, &deps, &tx, &mut refreshed, &why).await?;
+                    if !refresh_or_fail(&mut job, &deps, &cancel, &tx, &mut refreshed, &why).await? {
+                        return Ok(TransferOutcome::Stopped);
+                    }
                     continue;
                 }
                 Err(e) => {
@@ -345,7 +384,7 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
 
         if job.segments.is_empty() {
             if p.total == Some(0) {
-                prepare_part(&part, Some(0)).await?;
+                prepare_part(&part, Some(0), false).await?;
                 job.total_bytes = 0;
                 return finalize(&job, &cancel, &tx).await;
             }
@@ -359,7 +398,7 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
                 let extra = zip.as_ref().filter(|s| !s.is_stored()).map_or(0, |s| s.size);
                 ensure_space(&job.destination, t.saturating_add(extra))?;
             }
-            prepare_part(&part, p.total).await?;
+            prepare_part(&part, p.total, deps.cfg.sparse_files).await?;
         }
         let _ = tx.send(TransferUpdate::Probed {
             total_bytes: job.total_bytes,
@@ -377,7 +416,9 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
             }
             Err(RunError::Stopped) => return Ok(TransferOutcome::Stopped),
             Err(RunError::DeadLink(why)) => {
-                refresh_or_fail(&mut job, &deps, &tx, &mut refreshed, &why).await?;
+                if !refresh_or_fail(&mut job, &deps, &cancel, &tx, &mut refreshed, &why).await? {
+                    return Ok(TransferOutcome::Stopped);
+                }
             }
             Err(RunError::RangeIgnored) if zip.is_some() => {
                 return Err(TransferError::Transient("the server ignored the byte range".into()));

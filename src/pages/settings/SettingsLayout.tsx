@@ -7,6 +7,7 @@ import DownloadsSettings from "./DownloadsSettings";
 import LibrarySettings from "./LibrarySettings";
 import SearchSettings from "./SearchSettings";
 import BackupSettings from "./BackupSettings";
+import AdvancedSettings from "./AdvancedSettings";
 
 export const SETTINGS_SECTIONS = [
   { id: "general", label: "General", el: <GeneralSettings /> },
@@ -14,6 +15,7 @@ export const SETTINGS_SECTIONS = [
   { id: "downloads", label: "Downloads", el: <DownloadsSettings /> },
   { id: "library", label: "Library", el: <LibrarySettings /> },
   { id: "search", label: "Search", el: <SearchSettings /> },
+  { id: "advanced", label: "Advanced", el: <AdvancedSettings /> },
   { id: "backup", label: "About & Backup", el: <BackupSettings /> },
 ] as const;
 

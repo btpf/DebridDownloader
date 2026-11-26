@@ -69,6 +69,7 @@ pub fn fast_transfer_cfg() -> TransferConfig {
         checkpoint_bytes: 64 * 1024,
         checkpoint_interval: Duration::from_millis(50),
         progress_interval: Duration::from_millis(20),
+        sparse_files: true,
     }
 }
 
