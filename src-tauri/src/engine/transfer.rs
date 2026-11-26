@@ -7,11 +7,11 @@ use super::segment::{
 use super::types::{Job, SegmentState};
 use super::zip_remote::{self, DecodeOutcome};
 use reqwest::header::RANGE;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -57,6 +57,30 @@ pub struct TransferDeps {
     pub limiter: Arc<Limiter>,
     pub refresher: Arc<dyn LinkRefresher>,
     pub cfg: TransferConfig,
+    /// The user's "connections per file" setting, live: a change reaches running transfers at
+    /// once. `None` falls back to `cfg.segments_per_file`.
+    pub segments: Option<watch::Receiver<u32>>,
+}
+
+impl TransferDeps {
+    /// Connections per file the user currently wants (1–16).
+    fn segments_setting(&self) -> u32 {
+        self.segments.as_ref().map_or(self.cfg.segments_per_file, |r| *r.borrow()).clamp(1, 16)
+    }
+}
+
+/// Resolves when the live setting changes; never if there's no live setting.
+async fn setting_changed(rx: &mut Option<watch::Receiver<u32>>) {
+    match rx {
+        Some(r) => {
+            if r.changed().await.is_err() {
+                // Sender gone: the value can't change any more.
+                *rx = None;
+                std::future::pending::<()>().await;
+            }
+        }
+        None => std::future::pending::<()>().await,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -389,7 +413,7 @@ pub async fn run_transfer(mut job: Job, deps: TransferDeps, cancel: Cancellation
                 return finalize(&job, &cancel, &tx).await;
             }
             job.segments = match p.total {
-                Some(t) if ranges => plan_segments(t, job.max_segments.min(deps.cfg.segments_per_file), deps.cfg.min_segment),
+                Some(t) if ranges => plan_segments(t, job.max_segments.min(deps.segments_setting()), deps.cfg.min_segment),
                 Some(t) => vec![SegmentState { start: 0, end: t - 1, done: 0 }],
                 None => vec![SegmentState { start: 0, end: u64::MAX - 1, done: 0 }],
             };
@@ -475,15 +499,20 @@ impl SpeedMeter {
 
 type Workers = JoinSet<(usize, Result<u64, SegmentError>)>;
 
+/// Spawn one worker with its own `cancel` (a child of the run's token), so it can be stopped
+/// alone when the connection count is lowered.
+#[allow(clippy::too_many_arguments)]
 fn spawn_worker(
     set: &mut Workers,
-    ctx: Arc<SegmentCtx>,
+    base: &SegmentCtx,
+    cancel: CancellationToken,
     i: usize,
     seg: SegmentState,
     end: Arc<AtomicU64>,
     tx: mpsc::UnboundedSender<SegmentMsg>,
     delay: Option<std::time::Duration>,
 ) {
+    let ctx = SegmentCtx { cancel, ..base.clone() };
     set.spawn(async move {
         if let Some(d) = delay {
             tokio::select! {
@@ -532,7 +561,7 @@ async fn run_segments(
 ) -> Result<(), RunError> {
     let cfg = &deps.cfg;
     let run_cancel = cancel.child_token();
-    let ctx = Arc::new(SegmentCtx {
+    let ctx = SegmentCtx {
         client: deps.client.clone(),
         url: job.url.clone(),
         path: job.part_path(),
@@ -544,7 +573,7 @@ async fn run_segments(
         idle_timeout: cfg.idle_timeout,
         checkpoint_bytes: cfg.checkpoint_bytes,
         checkpoint_interval: cfg.checkpoint_interval,
-    });
+    };
     let (seg_tx, mut seg_rx) = mpsc::unbounded_channel::<SegmentMsg>();
     let mut ends: Vec<Arc<AtomicU64>> = job.segments.iter().map(|s| Arc::new(AtomicU64::new(s.end))).collect();
     let mut live: Vec<u64> = job.segments.iter().map(|s| s.done).collect();
@@ -552,7 +581,13 @@ async fn run_segments(
     let mut delays: HashMap<usize, std::time::Duration> = HashMap::new();
     let mut retries: HashMap<usize, u32> = HashMap::new();
     let mut active: Vec<usize> = Vec::new();
-    let mut cap = if use_range { job.max_segments.min(cfg.segments_per_file).max(1) as usize } else { 1 };
+    // Each worker's own token, so a lowered connection count can stop just the surplus.
+    let mut tokens: HashMap<usize, CancellationToken> = HashMap::new();
+    // Workers stopped because the count was lowered; their segments go back to `pending`.
+    let mut shed: HashSet<usize> = HashSet::new();
+    let mut setting_rx = deps.segments.clone();
+    // Effective cap: the user's live setting, never above the server-imposed `job.max_segments`.
+    let cap_now = |job: &Job| if use_range { job.max_segments.min(deps.segments_setting()).max(1) as usize } else { 1 };
     let mut set: Workers = JoinSet::new();
     let mut speed = SpeedMeter::new(std::time::Duration::from_secs(3));
     let mut tick = tokio::time::interval(cfg.progress_interval);
@@ -562,13 +597,38 @@ async fn run_segments(
         if not_before.is_some_and(|t| Instant::now() >= t) {
             not_before = None;
         }
+        let mut cap = cap_now(job);
+        // Lowered: stop the surplus, the ones with the fewest bytes left first. Each checkpoints
+        // as on pause, and its segment is re-queued when it returns.
+        let running = active.len() - shed.len();
+        if running > cap {
+            let mut by_left: Vec<(u64, usize)> = active
+                .iter()
+                .filter(|j| !shed.contains(j))
+                .map(|&j| ((ends[j].load(Ordering::SeqCst) + 1).saturating_sub(job.segments[j].start + live[j]), j))
+                .collect();
+            by_left.sort_unstable();
+            for &(_, j) in by_left.iter().take(running - cap) {
+                tokens[&j].cancel();
+                shed.insert(j);
+            }
+        }
         while active.len() < cap && not_before.is_none() {
+            if pending.is_empty() && use_range {
+                // Raised (or a worker finished): split the biggest remainder for the free slot.
+                let candidates: Vec<usize> = active.iter().copied().filter(|j| !shed.contains(j)).collect();
+                if !try_split(job, &mut ends, &mut live, &mut pending, &candidates, cfg.split_threshold, tx) {
+                    break;
+                }
+            }
             let Some(i) = pending.pop_front() else { break };
             if !use_range {
                 job.segments[i].done = 0; // can't resume without Range
             }
             live[i] = job.segments[i].done;
-            spawn_worker(&mut set, ctx.clone(), i, job.segments[i], ends[i].clone(), seg_tx.clone(), delays.remove(&i));
+            let token = run_cancel.child_token();
+            tokens.insert(i, token.clone());
+            spawn_worker(&mut set, &ctx, token, i, job.segments[i], ends[i].clone(), seg_tx.clone(), delays.remove(&i));
             active.push(i);
         }
         if active.is_empty() && pending.is_empty() {
@@ -582,28 +642,38 @@ async fn run_segments(
                 stop_workers(&run_cancel, &mut set, &mut seg_rx, job, &ends, tx).await;
                 return Err(RunError::Stopped);
             }
-            Some(msg) = seg_rx.recv() => match msg {
-                SegmentMsg::Bytes { index, n } => {
-                    live[index] += n;
-                    speed.add(n);
-                }
-                SegmentMsg::Checkpoint { index, done } => {
-                    job.segments[index].done = job.segments[index].done.max(done);
-                    job.segments[index].end = ends[index].load(Ordering::SeqCst);
-                    let _ = tx.send(TransferUpdate::Checkpoint { segments: job.segments.clone() });
-                }
-            },
+            Some(msg) = seg_rx.recv() => on_segment_msg(msg, job, &ends, &mut live, &mut speed, tx),
+            _ = setting_changed(&mut setting_rx) => {
+                // Nothing to do here: the top of the loop applies the new cap.
+                log::info!("{}: connections per file is now {}", job.id, cap_now(job));
+            }
             Some(res) = set.join_next(), if !set.is_empty() => {
                 let (i, r) = res.expect("segment task panicked");
                 active.retain(|&a| a != i);
+                tokens.remove(&i);
+                let was_shed = shed.remove(&i);
+                // The worker has returned, so everything it sent is already queued: take it in
+                // now, so its segment's `done` and `live` are exact before anything resumes it.
+                while let Ok(msg) = seg_rx.try_recv() {
+                    on_segment_msg(msg, job, &ends, &mut live, &mut speed, tx);
+                }
                 match r {
                     Ok(done) => {
                         job.segments[i].done = done;
                         job.segments[i].end = ends[i].load(Ordering::SeqCst);
                         live[i] = done;
-                        if use_range && pending.is_empty() {
-                            try_split(job, &mut ends, &mut live, &mut pending, &active, cfg.split_threshold, tx);
+                    }
+                    Err(SegmentError::Cancelled) if was_shed => {
+                        // Stopped because the count was lowered. Its last checkpoint is folded in
+                        // above; another connection resumes it from `start + done`. Bytes it wrote
+                        // past that checkpoint (none: a stop checkpoints after its last write) are
+                        // dropped from `live` so a resume doesn't count them twice.
+                        job.segments[i].end = ends[i].load(Ordering::SeqCst);
+                        live[i] = job.segments[i].done;
+                        if !job.segments[i].is_done() {
+                            pending.push_back(i);
                         }
+                        let _ = tx.send(TransferUpdate::Checkpoint { segments: job.segments.clone() });
                     }
                     Err(SegmentError::Cancelled) => {}
                     Err(e @ (SegmentError::Transient(_) | SegmentError::Connect(_))) => {
@@ -666,7 +736,8 @@ async fn run_segments(
                 let _ = tx.send(TransferUpdate::Progress {
                     downloaded: live.iter().sum(),
                     speed: speed.rate(),
-                    segments_active: active.len() as u32,
+                    // Workers being shed are on their way out; don't count them.
+                    segments_active: (active.len() - shed.len()) as u32,
                 });
             }
             _ = tokio::time::sleep_until(wake), if not_before.is_some() => {}
@@ -674,7 +745,8 @@ async fn run_segments(
     }
 }
 
-/// Split the active segment with the most bytes left, so no connection idles at the tail.
+/// Split the active segment with the most bytes left, so no connection idles at the tail (or a
+/// raised connection count gets its extra connections). False: nothing is big enough to split.
 fn try_split(
     job: &mut Job,
     ends: &mut Vec<Arc<AtomicU64>>,
@@ -683,7 +755,7 @@ fn try_split(
     active: &[usize],
     threshold: u64,
     tx: &UpdateTx,
-) {
+) -> bool {
     let best = active
         .iter()
         .map(|&j| {
@@ -693,7 +765,7 @@ fn try_split(
         })
         .filter(|&(_, _, _, rem)| rem > threshold)
         .max_by_key(|&(_, _, _, rem)| rem);
-    let Some((j, pos, end, rem)) = best else { return };
+    let Some((j, pos, end, rem)) = best else { return false };
     let mid = pos + rem / 2;
     ends[j].store(mid - 1, Ordering::SeqCst);
     job.segments[j].end = mid - 1;
@@ -702,4 +774,26 @@ fn try_split(
     live.push(0);
     pending.push_back(job.segments.len() - 1);
     let _ = tx.send(TransferUpdate::Checkpoint { segments: job.segments.clone() });
+    true
+}
+
+fn on_segment_msg(
+    msg: SegmentMsg,
+    job: &mut Job,
+    ends: &[Arc<AtomicU64>],
+    live: &mut [u64],
+    speed: &mut SpeedMeter,
+    tx: &UpdateTx,
+) {
+    match msg {
+        SegmentMsg::Bytes { index, n } => {
+            live[index] += n;
+            speed.add(n);
+        }
+        SegmentMsg::Checkpoint { index, done } => {
+            job.segments[index].done = job.segments[index].done.max(done);
+            job.segments[index].end = ends[index].load(Ordering::SeqCst);
+            let _ = tx.send(TransferUpdate::Checkpoint { segments: job.segments.clone() });
+        }
+    }
 }

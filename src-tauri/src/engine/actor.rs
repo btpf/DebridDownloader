@@ -10,7 +10,7 @@ use super::types::*;
 use super::{EngineDeps, Timing};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -102,6 +102,8 @@ pub struct Actor {
     last_emit: HashMap<String, Instant>,
     config: EngineConfig,
     transfer_cfg: TransferConfig,
+    /// Live "connections per file" for running transfers (see `TransferDeps::segments`).
+    segments: watch::Sender<u32>,
     timing: Timing,
     sink: Arc<dyn EventSink>,
     refresher: Arc<dyn LinkRefresher>,
@@ -132,6 +134,7 @@ impl Actor {
             last_emit: HashMap::new(),
             limiter: Arc::new(Limiter::new(deps.config.speed_limit_bytes)),
             client: build_client(&transfer_cfg),
+            segments: watch::Sender::new(transfer_cfg.segments_per_file),
             config: deps.config,
             transfer_cfg,
             timing: deps.timing,
@@ -199,6 +202,11 @@ impl Actor {
                 let rate = cfg.speed_limit_bytes;
                 tokio::spawn(async move { limiter.set_rate(rate).await });
                 self.transfer_cfg.segments_per_file = cfg.segments_per_file.clamp(1, 16);
+                self.segments.send_if_modified(|n| {
+                    let changed = *n != self.transfer_cfg.segments_per_file;
+                    *n = self.transfer_cfg.segments_per_file;
+                    changed
+                });
                 self.transfer_cfg.sparse_files = cfg.sparse_files;
                 self.config = cfg;
                 self.schedule();
@@ -430,6 +438,7 @@ impl Actor {
                     limiter: self.limiter.clone(),
                     refresher: self.refresher.clone(),
                     cfg: self.transfer_cfg.clone(),
+                    segments: Some(self.segments.subscribe()),
                 };
                 tokio::spawn(async move {
                     let (utx, mut urx) = mpsc::unbounded_channel();

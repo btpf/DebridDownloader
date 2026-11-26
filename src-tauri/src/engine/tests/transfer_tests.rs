@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 pub fn deps(refresher: Arc<FakeRefresher>) -> TransferDeps {
     let cfg = fast_transfer_cfg();
-    TransferDeps { client: build_client(&cfg), limiter: Arc::new(Limiter::new(None)), refresher, cfg }
+    TransferDeps { client: build_client(&cfg), limiter: Arc::new(Limiter::new(None)), refresher, cfg, segments: None }
 }
 
 pub fn http_job(dir: &tempfile::TempDir, name: &str, url: String, size: i64) -> Job {

@@ -51,6 +51,8 @@ struct Inner {
     active: usize,
     max_active: usize,
     ranges: Vec<(u64, u64)>,
+    /// Body bytes handed to the connection, over every request.
+    served: u64,
     drops_done: usize,
     stalls_done: usize,
 }
@@ -92,6 +94,7 @@ impl MockServer {
             active: 0,
             max_active: 0,
             ranges: Vec::new(),
+            served: 0,
             drops_done: 0,
             stalls_done: 0,
         }));
@@ -142,6 +145,10 @@ impl MockServer {
     }
     pub fn ranges(&self) -> Vec<(u64, u64)> {
         self.inner.lock().unwrap().ranges.clone()
+    }
+    /// Body bytes sent so far, across every request (the probe included).
+    pub fn served(&self) -> u64 {
+        self.inner.lock().unwrap().served
     }
 }
 
@@ -244,6 +251,7 @@ async fn handler(State(inner): State<Shared>, Path(token): Path<String>, headers
                 }
             }
             let chunk = Bytes::copy_from_slice(&body[pos..end]);
+            guard.0.lock().unwrap().served += chunk.len() as u64;
             Some((Ok::<Bytes, std::io::Error>(chunk), (body, end, false, guard)))
         },
     );

@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone)]
 pub struct SegmentCtx {
     pub client: reqwest::Client,
     pub url: String,

@@ -13,3 +13,4 @@ mod engine_tests;
 mod zip_tests;
 mod rar_tests;
 mod cancel_tests;
+mod live_segments_tests;
